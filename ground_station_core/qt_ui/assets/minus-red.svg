@@ -1,0 +1,6 @@
+<!-- 航点表删除选中行按钮使用的红色减号。 -->
+<!-- Copyright (c) 2026 北京航空航天大学 -->
+<!-- SPDX-License-Identifier: MulanPSL-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <path d="M4 10H16" fill="none" stroke="#a7352a" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

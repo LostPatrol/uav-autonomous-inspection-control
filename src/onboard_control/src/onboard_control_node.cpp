@@ -1,0 +1,2220 @@
+// Copyright (c) 2026 北京航空航天大学
+// SPDX-License-Identifier: MulanPSL-2.0
+/**
+ * @file onboard_control_node.cpp
+ * @brief 机载高层协议、控制权租约、MAVROS 编排、航点和固定周期输出实现。
+ */
+#include "onboard_control/onboard_control_node.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <utility>
+
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2/utils.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+
+namespace onboard_control
+{
+namespace
+{
+
+// 3.2 adds an isolated video-service protocol and per-waypoint photo metadata.
+constexpr char kInterfaceVersion[] = "3.2";
+constexpr std::uint32_t kMinimumTtlMs = 50;
+constexpr std::uint32_t kMaximumTtlMs = 10000;
+constexpr std::uint32_t kMinimumLeaseMs = 300;
+constexpr std::uint32_t kMaximumLeaseMs = 5000;
+constexpr std::size_t kMaximumWaypoints = 256;
+constexpr double kPi = 3.14159265358979323846;
+// MAVROS/FCU startup can need tens of seconds to pull the complete parameter list.
+constexpr auto kFcuParameterSyncGracePeriod = std::chrono::seconds(60);
+// A transient MAVLink service failure must not permanently suppress required telemetry.
+constexpr auto kAutomaticMessageRateRetryPeriod = std::chrono::seconds(5);
+constexpr double kBatteryMaximumAgeSeconds = 5.0;
+constexpr double kOriginConfirmationTimeoutSeconds = 8.0;
+constexpr double kOriginHorizontalToleranceDegrees = 2.0e-7;
+constexpr double kOriginAltitudeToleranceMeters = 0.5;
+
+const std::array<std::pair<std::uint32_t, float>, 5> kMessageIntervals{{
+  {32U, 100.0F},   // LOCAL_POSITION_NED
+  {31U, 100.0F},   // ATTITUDE_QUATERNION
+  {105U, 100.0F},  // HIGHRES_IMU
+  {1U, 1.0F},      // SYS_STATUS (battery fallback used by MAVROS)
+  // ArduPilot does not stream this by default on the real FCU.  Without it,
+  // MAVROS cannot publish ExtendedState and non-GCS takeoff edges are invisible.
+  {245U, 2.0F},    // EXTENDED_SYS_STATE
+}};
+
+bool finite_waypoint(const guided_interfaces::msg::Waypoint & waypoint)
+{
+  return std::isfinite(waypoint.position.x) && std::isfinite(waypoint.position.y) &&
+         std::isfinite(waypoint.position.z) && std::isfinite(waypoint.yaw);
+}
+
+bool valid_gain_profile(const ControllerParameters & parameters)
+{
+  return std::isfinite(parameters.wn_xy) && parameters.wn_xy > 0.0 &&
+    std::isfinite(parameters.zeta_xy) && parameters.zeta_xy > 0.0 &&
+    std::isfinite(parameters.wn_z) && parameters.wn_z > 0.0 &&
+    std::isfinite(parameters.zeta_z) && parameters.zeta_z > 0.0 &&
+    std::isfinite(parameters.observer_xy) && parameters.observer_xy >= 0.0 &&
+    std::isfinite(parameters.observer_z) && parameters.observer_z >= 0.0;
+}
+
+}  // namespace
+
+OnboardControlNode::OnboardControlNode(const rclcpp::NodeOptions & options)
+: Node("onboard_control_node", options),
+  controller_parameters_(),
+  controller_(controller_parameters_)
+{
+  control_frequency_hz_ = declare_parameter<double>("control_frequency", 100.0);
+  status_frequency_hz_ = declare_parameter<double>("status_frequency", 10.0);
+  pose_timeout_seconds_ = declare_parameter<double>("pose_timeout_seconds", 0.3);
+  state_timeout_seconds_ = declare_parameter<double>("state_timeout_seconds", 2.0);
+  fcu_parameter_check_initial_delay_seconds_ =
+    declare_parameter<double>("fcu_parameter_check_initial_delay_seconds", 40.0);
+  link_loss_land_timeout_seconds_ =
+    declare_parameter<double>("link_loss_land_timeout_seconds", 10.0);
+  takeoff_timeout_seconds_ = declare_parameter<double>("takeoff_timeout_seconds", 45.0);
+  land_confirmation_timeout_seconds_ =
+    declare_parameter<double>("land_confirmation_timeout_seconds", 120.0);
+  waypoint_tolerance_ = declare_parameter<double>("waypoint_tolerance", 0.3);
+  waypoint_hold_seconds_ = declare_parameter<double>("waypoint_hold_seconds", 1.0);
+  max_velocity_xy_ = declare_parameter<double>("max_velocity_xy", 1.5);
+  max_velocity_z_ = declare_parameter<double>("max_velocity_z", 0.8);
+  max_yaw_rate_ = declare_parameter<double>("max_yaw_rate", 1.0);
+  max_reference_error_xy_ = declare_parameter<double>("max_reference_error_xy", 0.8);
+  max_reference_error_z_ = declare_parameter<double>("max_reference_error_z", 0.5);
+  waypoint_start_speed_tolerance_ =
+    declare_parameter<double>("waypoint_start_speed_tolerance", 0.20);
+  waypoint_start_retry_interval_seconds_ =
+    declare_parameter<double>("waypoint_start_retry_interval_seconds", 1.0);
+  waypoint_start_failure_limit_ =
+    declare_parameter<int>("waypoint_start_failure_limit", 10);
+  waypoint_arrival_speed_tolerance_ =
+    declare_parameter<double>("waypoint_arrival_speed_tolerance", 0.10);
+  waypoint_arrival_retry_interval_seconds_ =
+    declare_parameter<double>("waypoint_arrival_retry_interval_seconds", 1.0);
+  waypoint_arrival_failure_limit_ =
+    declare_parameter<int>("waypoint_arrival_failure_limit", 10);
+  max_clock_skew_seconds_ = declare_parameter<double>("max_clock_skew_seconds", 2.0);
+  mavros_prefix_ = declare_parameter<std::string>("mavros_prefix", "/mavros");
+  interface_prefix_ =
+    declare_parameter<std::string>("interface_prefix", "/onboard_control");
+  video_prefix_ = declare_parameter<std::string>("video_prefix", "/video_service");
+
+  controller_parameters_.wn_xy = declare_parameter<double>("hover_wn_xy", 2.236);
+  controller_parameters_.zeta_xy = declare_parameter<double>("hover_zeta_xy", 0.8);
+  controller_parameters_.wn_z = declare_parameter<double>("hover_wn_z", 2.236);
+  controller_parameters_.zeta_z = declare_parameter<double>("hover_zeta_z", 0.6);
+  controller_parameters_.observer_xy = declare_parameter<double>("dob_L_xy", 1.5);
+  controller_parameters_.observer_z = declare_parameter<double>("dob_L_z", 0.6);
+  controller_parameters_.hover_throttle =
+    declare_parameter<double>("hover_throttle", 0.39);
+  controller_parameters_.thrust_ratio = declare_parameter<double>("thrust_ratio", 2.5);
+  controller_parameters_.gravity = declare_parameter<double>("gravity", 9.8);
+  controller_parameters_.max_acceleration_xy =
+    declare_parameter<double>("max_acceleration_xy", 4.0);
+  controller_parameters_.max_acceleration_z =
+    declare_parameter<double>("max_acceleration_z", 4.0);
+  controller_parameters_.max_disturbance =
+    declare_parameter<double>("max_disturbance", 3.0);
+  const double max_tilt_degrees = declare_parameter<double>("max_tilt_degrees", 25.0);
+  controller_parameters_.max_tilt_rad = max_tilt_degrees * kPi / 180.0;
+  controller_parameters_.min_total_acceleration_z =
+    declare_parameter<double>("min_total_acceleration_z", 2.0);
+
+  // 轨迹控制拥有独立低带宽增益，但继续共用推力映射与绝对安全限幅。
+  trajectory_controller_parameters_ = controller_parameters_;
+  trajectory_controller_parameters_.wn_xy =
+    declare_parameter<double>("trajectory_wn_xy", 1.2);
+  trajectory_controller_parameters_.zeta_xy =
+    declare_parameter<double>("trajectory_zeta_xy", 1.1);
+  trajectory_controller_parameters_.wn_z =
+    declare_parameter<double>("trajectory_wn_z", 1.2);
+  trajectory_controller_parameters_.zeta_z =
+    declare_parameter<double>("trajectory_zeta_z", 1.1);
+  trajectory_controller_parameters_.observer_xy =
+    declare_parameter<double>("trajectory_dob_L_xy", 0.5);
+  trajectory_controller_parameters_.observer_z =
+    declare_parameter<double>("trajectory_dob_L_z", 0.3);
+
+  auto & filter = reference_generator_parameters_.second_order;
+  filter.wn_xy = declare_parameter<double>("second_order_filter_wn_xy", 0.8);
+  filter.zeta_xy = declare_parameter<double>("second_order_filter_zeta_xy", 1.1);
+  filter.wn_z = declare_parameter<double>("second_order_filter_wn_z", 0.6);
+  filter.zeta_z = declare_parameter<double>("second_order_filter_zeta_z", 1.1);
+  filter.max_velocity_xy =
+    declare_parameter<double>("second_order_filter_max_velocity_xy", 0.30);
+  filter.max_velocity_z =
+    declare_parameter<double>("second_order_filter_max_velocity_z", 0.15);
+  filter.max_acceleration_xy =
+    declare_parameter<double>("second_order_filter_max_acceleration_xy", 0.18);
+  filter.max_acceleration_z =
+    declare_parameter<double>("second_order_filter_max_acceleration_z", 0.10);
+  filter.completion_position_tolerance =
+    declare_parameter<double>("second_order_filter_completion_position_tolerance", 0.005);
+  filter.completion_velocity_tolerance =
+    declare_parameter<double>("second_order_filter_completion_velocity_tolerance", 0.01);
+
+  auto & trapezoidal = reference_generator_parameters_.trapezoidal;
+  trapezoidal.max_velocity_xy =
+    declare_parameter<double>("trapezoidal_max_velocity_xy", 0.30);
+  trapezoidal.max_velocity_z =
+    declare_parameter<double>("trapezoidal_max_velocity_z", 0.15);
+  trapezoidal.max_acceleration_xy =
+    declare_parameter<double>("trapezoidal_max_acceleration_xy", 0.18);
+  trapezoidal.max_acceleration_z =
+    declare_parameter<double>("trapezoidal_max_acceleration_z", 0.10);
+  trapezoidal.max_deceleration_xy =
+    declare_parameter<double>("trapezoidal_max_deceleration_xy", 0.20);
+  trapezoidal.max_deceleration_z =
+    declare_parameter<double>("trapezoidal_max_deceleration_z", 0.12);
+
+  auto & s_curve = reference_generator_parameters_.s_curve;
+  s_curve.max_velocity_xy =
+    declare_parameter<double>("s_curve_max_velocity_xy", 0.30);
+  s_curve.max_velocity_z =
+    declare_parameter<double>("s_curve_max_velocity_z", 0.15);
+  s_curve.max_acceleration_xy =
+    declare_parameter<double>("s_curve_max_acceleration_xy", 0.18);
+  s_curve.max_acceleration_z =
+    declare_parameter<double>("s_curve_max_acceleration_z", 0.10);
+  s_curve.max_deceleration_xy =
+    declare_parameter<double>("s_curve_max_deceleration_xy", 0.20);
+  s_curve.max_deceleration_z =
+    declare_parameter<double>("s_curve_max_deceleration_z", 0.12);
+  s_curve.max_jerk_xy = declare_parameter<double>("s_curve_max_jerk_xy", 0.15);
+  s_curve.max_jerk_z = declare_parameter<double>("s_curve_max_jerk_z", 0.08);
+
+  if (control_frequency_hz_ < 20.0 || control_frequency_hz_ > 400.0 ||
+    status_frequency_hz_ <= 0.0 || pose_timeout_seconds_ <= 0.0 ||
+    fcu_parameter_check_initial_delay_seconds_ < 0.1 ||
+    fcu_parameter_check_initial_delay_seconds_ > 60.0 ||
+    link_loss_land_timeout_seconds_ <= 0.0 || land_confirmation_timeout_seconds_ < 10.0 ||
+    land_confirmation_timeout_seconds_ > 600.0 || max_velocity_xy_ <= 0.0 ||
+    max_velocity_z_ <= 0.0 || !std::isfinite(waypoint_tolerance_) ||
+    waypoint_tolerance_ <= 0.0 || !std::isfinite(waypoint_hold_seconds_) ||
+    waypoint_hold_seconds_ < 0.0 || !std::isfinite(waypoint_start_speed_tolerance_) ||
+    waypoint_start_speed_tolerance_ <= 0.0 ||
+    !std::isfinite(waypoint_start_retry_interval_seconds_) ||
+    waypoint_start_retry_interval_seconds_ <= 0.0 || waypoint_start_failure_limit_ < 1 ||
+    !std::isfinite(waypoint_arrival_speed_tolerance_) ||
+    waypoint_arrival_speed_tolerance_ <= 0.0 ||
+    !std::isfinite(waypoint_arrival_retry_interval_seconds_) ||
+    waypoint_arrival_retry_interval_seconds_ <= 0.0 ||
+    waypoint_arrival_failure_limit_ < 1 ||
+    !std::isfinite(max_clock_skew_seconds_) || max_clock_skew_seconds_ <= 0.0 ||
+    controller_parameters_.hover_throttle <= 0.0 ||
+    controller_parameters_.hover_throttle >= 1.0 || controller_parameters_.thrust_ratio <= 1.0)
+  {
+    throw std::invalid_argument("机载控制参数超出安全范围");
+  }
+  if (!valid_gain_profile(controller_parameters_) ||
+    !valid_gain_profile(trajectory_controller_parameters_) ||
+    !valid_reference_generator_parameters(reference_generator_parameters_))
+  {
+    throw std::invalid_argument("控制增益或航点参考生成参数非法");
+  }
+  waypoint_start_tracker_ = WaypointStartTracker(
+    waypoint_start_retry_interval_seconds_, waypoint_start_failure_limit_);
+  waypoint_arrival_tracker_ = WaypointArrivalTracker(
+    waypoint_arrival_retry_interval_seconds_, waypoint_arrival_failure_limit_);
+  controller_ = DobController(controller_parameters_);
+
+  attitude_topic_ = mavros_prefix_ + "/setpoint_raw/attitude";
+  attitude_publisher_ = create_publisher<mavros_msgs::msg::AttitudeTarget>(
+    attitude_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).best_effort());
+  origin_publisher_ = create_publisher<geographic_msgs::msg::GeoPointStamped>(
+    mavros_prefix_ + "/global_position/set_gp_origin", rclcpp::QoS(10).reliable());
+  status_publisher_ = create_publisher<guided_interfaces::msg::ControlStatus>(
+    interface_prefix_ + "/status", rclcpp::QoS(rclcpp::KeepLast(1)).best_effort());
+  result_publisher_ = create_publisher<guided_interfaces::msg::CommandResult>(
+    interface_prefix_ + "/command_result", rclcpp::QoS(50).reliable());
+  video_control_publisher_ = create_publisher<guided_interfaces::msg::VideoControl>(
+    video_prefix_ + "/control",
+    rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
+  video_capture_publisher_ = create_publisher<guided_interfaces::msg::VideoCapture>(
+    video_prefix_ + "/capture", rclcpp::QoS(256).reliable());
+
+  state_subscription_ = create_subscription<mavros_msgs::msg::State>(
+    mavros_prefix_ + "/state", rclcpp::QoS(10).reliable(),
+    std::bind(&OnboardControlNode::on_fcu_state, this, std::placeholders::_1));
+  extended_state_subscription_ = create_subscription<mavros_msgs::msg::ExtendedState>(
+    mavros_prefix_ + "/extended_state", rclcpp::QoS(10).reliable(),
+    std::bind(&OnboardControlNode::on_extended_state, this, std::placeholders::_1));
+  pose_subscription_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+    mavros_prefix_ + "/local_position/pose", rclcpp::SensorDataQoS().keep_last(1),
+    std::bind(&OnboardControlNode::on_pose, this, std::placeholders::_1));
+  velocity_subscription_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+    mavros_prefix_ + "/local_position/velocity_local", rclcpp::SensorDataQoS().keep_last(1),
+    std::bind(&OnboardControlNode::on_velocity, this, std::placeholders::_1));
+  battery_subscription_ = create_subscription<sensor_msgs::msg::BatteryState>(
+    mavros_prefix_ + "/battery", rclcpp::SensorDataQoS().keep_last(1),
+    std::bind(&OnboardControlNode::on_battery, this, std::placeholders::_1));
+  global_origin_subscription_ =
+    create_subscription<geographic_msgs::msg::GeoPointStamped>(
+    mavros_prefix_ + "/global_position/gp_origin",
+    rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+    std::bind(&OnboardControlNode::on_global_origin, this, std::placeholders::_1));
+  heartbeat_subscription_ = create_subscription<guided_interfaces::msg::ControlHeartbeat>(
+    interface_prefix_ + "/heartbeat", rclcpp::QoS(10).reliable(),
+    std::bind(&OnboardControlNode::on_heartbeat, this, std::placeholders::_1));
+  motion_subscription_ = create_subscription<guided_interfaces::msg::MotionIntent>(
+    interface_prefix_ + "/motion_intent", rclcpp::QoS(20).reliable(),
+    std::bind(&OnboardControlNode::on_motion_intent, this, std::placeholders::_1));
+
+  acquire_service_ = create_service<AcquireControl>(
+    interface_prefix_ + "/acquire_control",
+    std::bind(
+      &OnboardControlNode::on_acquire_control, this,
+      std::placeholders::_1, std::placeholders::_2));
+  flight_command_service_ = create_service<FlightCommand>(
+    interface_prefix_ + "/flight_command",
+    std::bind(
+      &OnboardControlNode::on_flight_command, this,
+      std::placeholders::_1, std::placeholders::_2));
+  waypoint_service_ = create_service<ExecuteWaypoints>(
+    interface_prefix_ + "/execute_waypoints",
+    std::bind(
+      &OnboardControlNode::on_execute_waypoints, this,
+      std::placeholders::_1, std::placeholders::_2));
+  origin_service_ = create_service<SetGpsOrigin>(
+    interface_prefix_ + "/set_gps_origin",
+    std::bind(
+      &OnboardControlNode::on_set_gps_origin, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  set_mode_client_ = create_client<mavros_msgs::srv::SetMode>(mavros_prefix_ + "/set_mode");
+  arming_client_ = create_client<mavros_msgs::srv::CommandBool>(mavros_prefix_ + "/cmd/arming");
+  takeoff_client_ = create_client<mavros_msgs::srv::CommandTOL>(mavros_prefix_ + "/cmd/takeoff");
+  message_interval_client_ = create_client<mavros_msgs::srv::MessageInterval>(
+    mavros_prefix_ + "/set_message_interval");
+  fcu_parameter_client_ = std::make_shared<rclcpp::AsyncParametersClient>(
+    this, mavros_prefix_ + "/param");
+
+  const auto control_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::duration<double>(1.0 / control_frequency_hz_));
+  const auto status_period = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::duration<double>(1.0 / status_frequency_hz_));
+  // 独立回调组允许 100 Hz 控制与图查询、服务响应在多线程执行器中并行调度。
+  control_callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  control_timer_ = create_wall_timer(
+    control_period, std::bind(&OnboardControlNode::control_tick, this),
+    control_callback_group_);
+  status_timer_ = create_wall_timer(status_period, std::bind(&OnboardControlNode::status_tick, this));
+
+  RCLCPP_INFO(
+    get_logger(),
+    "机载控制服务 %s 启动：控制 %.1f Hz，接口 %s，MAVROS %s，视频 %s",
+    kInterfaceVersion, control_frequency_hz_, interface_prefix_.c_str(), mavros_prefix_.c_str(),
+    video_prefix_.c_str());
+}
+
+void OnboardControlNode::on_fcu_state(const mavros_msgs::msg::State::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  const bool was_connected = fcu_connected_;
+  const bool was_armed = armed_;
+  fcu_connected_ = message->connected;
+  armed_ = message->armed;
+  autopilot_mode_ = message->mode;
+  last_state_time_ = SteadyClock::now();
+  if (!fcu_connected_) {
+    thrust_mode_verified_ = false;
+    fcu_parameter_sync_started_ = SteadyTime{};
+    last_thrust_mode_check_ = SteadyTime{};
+    // Message intervals are runtime FCU state and must be re-applied after reconnection.
+    message_rates_configured_ = false;
+    message_rate_configuration_active_ = false;
+    message_rate_index_ = 0;
+    last_automatic_message_rate_attempt_ = SteadyTime{};
+    battery_present_ = false;
+    // 已知断线时不得用 MAVROS 上一条 FCU 会话的 transient 缓存确认请求。
+    global_origin_observed_ = false;
+    if (was_connected && origin_confirmation_active_) {
+      publish_result(
+        origin_command_, guided_interfaces::msg::CommandResult::STATUS_FAILED, true,
+        "飞控连接中断，GPS 原点未能完成回读确认");
+      origin_confirmation_active_ = false;
+    }
+  } else if (!was_connected) {
+    fcu_parameter_sync_started_ = last_state_time_;
+    last_thrust_mode_check_ = SteadyTime{};
+    message_rates_configured_ = false;
+    message_rate_configuration_active_ = false;
+    message_rate_index_ = 0;
+    last_automatic_message_rate_attempt_ = SteadyTime{};
+    set_status_message(
+      "等待 MAVROS 完成飞控参数同步，姿态/推力控制暂未启用",
+      StatusLogLevel::kDebug);
+  }
+
+  if (was_armed && !armed_) {
+    airborne_ = false;
+    publish_video_control(false, "onboard-flight", "飞行器已解除武装");
+    const ActiveTask completed_task = active_task_;
+    const CommandIdentity completed_command = active_command_;
+    controller_engaged_ = false;
+    active_task_ = ActiveTask::kNone;
+    waypoints_.clear();
+    reference_.velocity.setZero();
+    reference_.acceleration.setZero();
+    target_yaw_rate_ = 0.0;
+    control_mode_ = guided_interfaces::msg::ControlStatus::MODE_IDLE;
+    reset_waypoint_reference_state();
+    activate_tracking_controller(TrackingControllerType::kPositionPdDob);
+    clear_waypoint_configuration_lock();
+    link_loss_started_.reset();
+    failsafe_land_requested_ = false;
+    set_status_message("飞行器已解除武装，机载控制回到待机");
+    if (completed_task == ActiveTask::kLand) {
+      publish_result(
+        completed_command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+        "飞行器已解除武装，已确认降落完成");
+    }
+  }
+}
+
+void OnboardControlNode::on_extended_state(
+  const mavros_msgs::msg::ExtendedState::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  const bool on_ground =
+    message->landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_ON_GROUND;
+  const bool in_flight_phase =
+    message->landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_TAKEOFF ||
+    message->landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_IN_AIR ||
+    message->landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_LANDING;
+
+  if (!extended_state_observed_) {
+    extended_state_observed_ = true;
+    airborne_ = in_flight_phase;
+    if (on_ground || in_flight_phase) {
+      publish_video_control(
+        in_flight_phase, "onboard-flight",
+        in_flight_phase ? "检测到飞行器已起飞" : "检测到飞行器位于地面");
+    }
+    return;
+  }
+  if (!airborne_ && in_flight_phase) {
+    airborne_ = true;
+    publish_video_control(true, "onboard-flight", "检测到起飞/空中状态");
+  } else if (airborne_ && on_ground) {
+    airborne_ = false;
+    publish_video_control(false, "onboard-flight", "检测到可靠落地状态");
+  }
+}
+
+void OnboardControlNode::on_pose(const geometry_msgs::msg::PoseStamped::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  vehicle_.position = Eigen::Vector3d(
+    message->pose.position.x, message->pose.position.y, message->pose.position.z);
+  tf2::Quaternion attitude;
+  tf2::fromMsg(message->pose.orientation, attitude);
+  tf2::Matrix3x3(attitude).getRPY(roll_, pitch_, yaw_);
+  pose_valid_ = vehicle_.position.allFinite() && std::isfinite(roll_) &&
+    std::isfinite(pitch_) && std::isfinite(yaw_);
+  last_pose_time_ = SteadyClock::now();
+}
+
+void OnboardControlNode::on_velocity(const geometry_msgs::msg::TwistStamped::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  vehicle_.velocity = Eigen::Vector3d(
+    message->twist.linear.x, message->twist.linear.y, message->twist.linear.z);
+  velocity_valid_ = vehicle_.velocity.allFinite();
+  last_velocity_time_ = SteadyClock::now();
+}
+
+void OnboardControlNode::on_battery(
+  const sensor_msgs::msg::BatteryState::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  battery_present_ = message->present;
+  battery_voltage_ = message->voltage;
+  battery_current_ = message->current;
+  battery_percentage_ = message->percentage;
+  last_battery_time_ = SteadyClock::now();
+}
+
+void OnboardControlNode::on_global_origin(
+  const geographic_msgs::msg::GeoPointStamped::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  last_global_origin_ = message->position;
+  // 节点启动时 transient 原点可能先于第一条 State 到达，此时暂存有效；
+  // 若随后确认 FCU 断线，on_fcu_state 会清除。已知断线期间的旧缓存无效。
+  global_origin_observed_ = fcu_connected_ || last_state_time_ == SteadyTime{};
+  if (!global_origin_observed_ || !origin_confirmation_active_ ||
+    !origins_match(requested_origin_, last_global_origin_))
+  {
+    return;
+  }
+
+  const CommandIdentity completed = origin_command_;
+  origin_confirmation_active_ = false;
+  std::ostringstream stream;
+  stream << "GPS 原点已由飞控回读确认 (lat=" << last_global_origin_.latitude
+         << ", lon=" << last_global_origin_.longitude
+         << ", alt=" << last_global_origin_.altitude << ")";
+  set_status_message(stream.str());
+  publish_result(
+    completed, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+    stream.str());
+}
+
+bool OnboardControlNode::validate_envelope_fields(
+  const builtin_interfaces::msg::Time & stamp,
+  const std::uint32_t ttl_ms,
+  const std::string & source,
+  std::string & reason) const
+{
+  if (source.empty()) {
+    reason = "命令来源不能为空";
+    return false;
+  }
+  if (ttl_ms < kMinimumTtlMs || ttl_ms > kMaximumTtlMs) {
+    reason = "命令有效期超出允许范围";
+    return false;
+  }
+  const rclcpp::Time sent_time(stamp);
+  if (sent_time.nanoseconds() <= 0) {
+    reason = "命令时间戳无效";
+    return false;
+  }
+  return true;
+}
+
+bool OnboardControlNode::validate_envelope(
+  const builtin_interfaces::msg::Time & stamp,
+  const std::uint32_t ttl_ms,
+  const std::string & source,
+  std::string & reason) const
+{
+  if (!validate_envelope_fields(stamp, ttl_ms, source, reason)) {
+    return false;
+  }
+  if (sender_clock_source_ != source || sender_clock_received_ == SteadyTime{}) {
+    reason = "地面站本地时间基准未建立，请重新申请控制权";
+    return false;
+  }
+
+  // 绝对墙钟可能因无外网相差数日；只比较租约基准后的两端相对流逝时间。
+  const auto sent_ns = rclcpp::Time(stamp).nanoseconds();
+  const double sender_elapsed_seconds =
+    static_cast<double>(sent_ns - sender_clock_stamp_ns_) / 1.0e9;
+  const double receiver_elapsed_seconds = std::chrono::duration<double>(
+    SteadyClock::now() - sender_clock_received_).count();
+  const double age_seconds = receiver_elapsed_seconds - sender_elapsed_seconds;
+  if (age_seconds < -max_clock_skew_seconds_) {
+    reason = "命令发送时间快于当前地面站本地时间基准";
+    return false;
+  }
+  if (age_seconds * 1000.0 > static_cast<double>(ttl_ms)) {
+    reason = "命令已过期";
+    return false;
+  }
+  return true;
+}
+
+void OnboardControlNode::align_sender_clock(
+  const builtin_interfaces::msg::Time & stamp,
+  const std::string & source)
+{
+  const auto received = SteadyClock::now();
+  const auto sent_ns = rclcpp::Time(stamp).nanoseconds();
+  if (sender_clock_source_ == source && sender_clock_received_ != SteadyTime{}) {
+    const double sender_elapsed_seconds =
+      static_cast<double>(sent_ns - sender_clock_stamp_ns_) / 1.0e9;
+    const double receiver_elapsed_seconds = std::chrono::duration<double>(
+      received - sender_clock_received_).count();
+    const double discontinuity_seconds = receiver_elapsed_seconds - sender_elapsed_seconds;
+    if (std::abs(discontinuity_seconds) > max_clock_skew_seconds_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "地面站本地时间基准发生 %.3f 秒跳变，已按最新租约心跳重新对齐",
+        discontinuity_seconds);
+    }
+  }
+  sender_clock_source_ = source;
+  sender_clock_stamp_ns_ = sent_ns;
+  sender_clock_received_ = received;
+}
+
+void OnboardControlNode::clear_sender_clock()
+{
+  sender_clock_source_.clear();
+  sender_clock_stamp_ns_ = 0;
+  sender_clock_received_ = SteadyTime{};
+}
+
+bool OnboardControlNode::lease_active_locked() const
+{
+  return !lease_owner_.empty() && SteadyClock::now() < lease_deadline_;
+}
+
+std::uint32_t OnboardControlNode::lease_remaining_ms_locked() const
+{
+  if (!lease_active_locked()) {
+    return 0;
+  }
+  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+    lease_deadline_ - SteadyClock::now()).count();
+  return static_cast<std::uint32_t>(std::max<std::int64_t>(0, remaining));
+}
+
+bool OnboardControlNode::has_control_locked(const std::string & source) const
+{
+  return lease_active_locked() && lease_owner_ == source;
+}
+
+void OnboardControlNode::on_acquire_control(
+  const std::shared_ptr<AcquireControl::Request> request,
+  std::shared_ptr<AcquireControl::Response> response)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::string reason;
+  if (request->lease_duration_ms < kMinimumLeaseMs ||
+    request->lease_duration_ms > kMaximumLeaseMs ||
+    !validate_envelope_fields(
+      request->stamp, request->lease_duration_ms, request->source_id, reason))
+  {
+    response->message = reason.empty() ? "租约时长超出允许范围" : reason;
+    response->owner = lease_owner_;
+    response->lease_remaining_ms = lease_remaining_ms_locked();
+    return;
+  }
+
+  auto & last_sequence = last_lease_sequence_[request->source_id];
+  if (request->sequence <= last_sequence) {
+    response->message = "租约请求序号重复或乱序";
+    response->owner = lease_owner_;
+    response->lease_remaining_ms = lease_remaining_ms_locked();
+    return;
+  }
+  last_sequence = request->sequence;
+
+  if (request->release) {
+    if (lease_owner_ != request->source_id) {
+      response->message = "当前客户端不是控制权持有者";
+    } else {
+      lease_owner_.clear();
+      lease_deadline_ = SteadyTime{};
+      clear_sender_clock();
+      response->granted = true;
+      response->message = "控制权已主动释放";
+      set_status_message(response->message);
+    }
+    response->owner = lease_owner_;
+    response->lease_remaining_ms = lease_remaining_ms_locked();
+    return;
+  }
+
+  if (lease_active_locked() && lease_owner_ != request->source_id) {
+    response->message = "控制权正由另一客户端持有";
+    response->owner = lease_owner_;
+    response->lease_remaining_ms = lease_remaining_ms_locked();
+    return;
+  }
+
+  lease_owner_ = request->source_id;
+  lease_deadline_ = SteadyClock::now() +
+    std::chrono::milliseconds(request->lease_duration_ms);
+  align_sender_clock(request->stamp, request->source_id);
+  response->granted = true;
+  response->owner = lease_owner_;
+  response->lease_remaining_ms = lease_remaining_ms_locked();
+  response->message = "控制权已授予";
+  set_status_message("地面站控制权已授予 " + lease_owner_);
+}
+
+void OnboardControlNode::on_heartbeat(
+  const guided_interfaces::msg::ControlHeartbeat::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  if (message->lease_duration_ms < kMinimumLeaseMs ||
+    message->lease_duration_ms > kMaximumLeaseMs || lease_owner_ != message->source_id)
+  {
+    return;
+  }
+  std::string reason;
+  if (!validate_envelope_fields(
+      message->header.stamp, message->lease_duration_ms, message->source_id, reason))
+  {
+    return;
+  }
+  auto & last_sequence = last_lease_sequence_[message->source_id];
+  if (message->sequence <= last_sequence) {
+    return;
+  }
+  last_sequence = message->sequence;
+  // 当前租约持有者的有序心跳是地面站本地时间的持续权威基准；不依赖 NTP。
+  align_sender_clock(message->header.stamp, message->source_id);
+  lease_deadline_ = SteadyClock::now() +
+    std::chrono::milliseconds(message->lease_duration_ms);
+}
+
+bool OnboardControlNode::authorize_flight_sequence(
+  const std::string & source,
+  const std::uint64_t sequence,
+  std::string & reason)
+{
+  if (!has_control_locked(source)) {
+    reason = lease_active_locked() ? "当前客户端没有控制权" : "控制权租约未建立或已过期";
+    return false;
+  }
+  auto & last_sequence = last_flight_sequence_[source];
+  if (sequence <= last_sequence) {
+    reason = "命令序号重复或乱序";
+    return false;
+  }
+  last_sequence = sequence;
+  return true;
+}
+
+void OnboardControlNode::on_motion_intent(
+  const guided_interfaces::msg::MotionIntent::SharedPtr message)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  CommandIdentity command{message->source_id, message->sequence, "motion"};
+  std::string reason;
+  if (!validate_envelope(
+      message->header.stamp, message->ttl_ms, message->source_id, reason) ||
+    !authorize_flight_sequence(message->source_id, message->sequence, reason))
+  {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_REJECTED, true, reason);
+    return;
+  }
+  if (!armed_ || autopilot_mode_ != "GUIDED" || !pose_valid_) {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_REJECTED, true,
+      "运动意图要求飞行器已武装、处于 GUIDED 且本地位置有效");
+    return;
+  }
+  if (!thrust_mode_verified_) {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_REJECTED, true,
+      "尚未确认 GUID_OPTIONS=8，拒绝姿态/推力控制");
+    return;
+  }
+  const Eigen::Vector3d delta(
+    message->velocity_delta.x, message->velocity_delta.y, message->velocity_delta.z);
+  if (!delta.allFinite() || !std::isfinite(message->yaw_rate_delta)) {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_REJECTED, true,
+      "运动意图包含非有限数值");
+    return;
+  }
+  if (active_task_ == ActiveTask::kTakeoff || active_task_ == ActiveTask::kLand) {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_REJECTED, true,
+      "起降流程执行期间不接受方向意图");
+    return;
+  }
+
+  const bool entering_motion =
+    control_mode_ != guided_interfaces::msg::ControlStatus::MODE_MOTION;
+  cancel_active_task("航点任务已被新的键盘运动意图覆盖");
+  if (entering_motion) {
+    reference_.position = vehicle_.position;
+    reference_.velocity.setZero();
+    reference_.acceleration.setZero();
+    reference_.yaw = yaw_;
+    target_yaw_rate_ = 0.0;
+    reset_waypoint_reference_state();
+    activate_tracking_controller(TrackingControllerType::kPositionPdDob);
+  }
+
+  reference_.velocity += delta;
+  reference_.acceleration.setZero();
+  const double horizontal_speed = reference_.velocity.head<2>().norm();
+  if (horizontal_speed > max_velocity_xy_) {
+    reference_.velocity.head<2>() *= max_velocity_xy_ / horizontal_speed;
+  }
+  reference_.velocity.z() = std::clamp(
+    reference_.velocity.z(), -max_velocity_z_, max_velocity_z_);
+  target_yaw_rate_ = std::clamp(
+    target_yaw_rate_ + message->yaw_rate_delta, -max_yaw_rate_, max_yaw_rate_);
+  active_command_ = command;
+  control_mode_ = guided_interfaces::msg::ControlStatus::MODE_MOTION;
+  controller_engaged_ = true;
+  clear_failsafe_locked();
+
+  std::ostringstream stream;
+  stream << "运动意图已接受：V=(" << reference_.velocity.x() << ", "
+         << reference_.velocity.y() << ", " << reference_.velocity.z()
+         << ") m/s, yaw_rate=" << target_yaw_rate_ << " rad/s";
+  set_status_message(stream.str(), StatusLogLevel::kDebug);
+  publish_result(
+    command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true, stream.str());
+}
+
+void OnboardControlNode::on_flight_command(
+  const std::shared_ptr<FlightCommand::Request> request,
+  std::shared_ptr<FlightCommand::Response> response)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::string reason;
+  if (!validate_envelope(request->stamp, request->ttl_ms, request->source_id, reason) ||
+    !authorize_flight_sequence(request->source_id, request->sequence, reason))
+  {
+    response->message = reason;
+    return;
+  }
+
+  CommandIdentity command{request->source_id, request->sequence, "unknown"};
+  switch (request->command) {
+    case FlightCommand::Request::COMMAND_TAKEOFF:
+      command.name = "takeoff";
+      if (!fcu_connected_ || !pose_valid_) {
+        response->message = "飞控或本地位置尚未就绪";
+        return;
+      }
+      if (!thrust_mode_verified_) {
+        response->message = "尚未确认 GUID_OPTIONS=8，拒绝起飞后切入姿态/推力控制";
+        return;
+      }
+      if (!std::isfinite(request->value) || request->value <= 0.0 || request->value > 20.0) {
+        response->message = "起飞高度必须在 (0, 20] 米范围内";
+        return;
+      }
+      start_takeoff(command, request->value);
+      response->accepted = true;
+      response->message = "起飞命令已由机载服务接收";
+      break;
+    case FlightCommand::Request::COMMAND_LAND:
+      command.name = "land";
+      if (!fcu_connected_) {
+        response->message = "飞控未连接";
+        return;
+      }
+      if (!armed_) {
+        response->message = "飞行器未武装，无需执行降落";
+        return;
+      }
+      start_land(command, false);
+      response->accepted = true;
+      response->message = "降落命令已由机载服务接收";
+      break;
+    case FlightCommand::Request::COMMAND_HOVER:
+      command.name = "hover";
+      if (!armed_ || autopilot_mode_ != "GUIDED" || !pose_valid_) {
+        response->message = "悬停要求飞行器已武装、处于 GUIDED 且本地位置有效";
+        return;
+      }
+      if (!thrust_mode_verified_) {
+        response->message = "尚未确认 GUID_OPTIONS=8，拒绝姿态/推力控制";
+        return;
+      }
+      cancel_active_task("当前任务已被悬停命令覆盖");
+      active_command_ = command;
+      enter_hover("PD+DOB 悬停已在机载端接管");
+      clear_failsafe_locked();
+      publish_result(
+        command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+        "PD+DOB 悬停已在机载端接管");
+      response->accepted = true;
+      response->message = "悬停命令已执行";
+      break;
+    case FlightCommand::Request::COMMAND_CANCEL:
+      command.name = "cancel";
+      cancel_active_task("任务已由地面站取消");
+      active_command_ = command;
+      if (armed_ && autopilot_mode_ == "GUIDED" && pose_valid_) {
+        enter_hover("任务已取消，机载端保持当前位置");
+      } else {
+        control_mode_ = guided_interfaces::msg::ControlStatus::MODE_IDLE;
+        controller_engaged_ = false;
+      }
+      clear_failsafe_locked();
+      publish_result(
+        command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+        "任务已取消");
+      response->accepted = true;
+      response->message = "取消命令已执行";
+      break;
+    case FlightCommand::Request::COMMAND_CONFIGURE_RATES:
+      command.name = "set_rates";
+      if (!fcu_connected_ || !message_interval_client_->service_is_ready()) {
+        response->message = "MAVROS 消息频率服务尚未就绪";
+        return;
+      }
+      if (message_rates_configured_) {
+        publish_result(
+          command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+          "MAVLink 本地位置/姿态/IMU/电池状态消息频率已经就绪");
+        response->accepted = true;
+        response->message = "消息频率已经配置";
+        return;
+      }
+      if (message_rate_configuration_active_) {
+        // Attach the explicit client ticket to the already-running automatic chain.
+        message_rate_command_ = command;
+        message_rate_publish_result_ = true;
+        publish_result(
+          command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+          "机载端正在配置 MAVLink 消息频率");
+        response->accepted = true;
+        response->message = "消息频率配置已在执行";
+        return;
+      }
+      start_message_rate_configuration(command);
+      response->accepted = true;
+      response->message = "消息频率配置已启动";
+      break;
+    case FlightCommand::Request::COMMAND_CLEAR_ABNORMAL:
+      command.name = "clear_abnormal";
+      if (armed_) {
+        response->message = "飞行中禁止清除无人机异常状态";
+        return;
+      }
+      // TODO(机库联动): 当前由地面站在解除武装且 XYZ 进入可配机库阈值后
+      // 请求清除；待机库设备接入后，还需验证硬件入库证据。
+      vehicle_abnormal_ = false;
+      vehicle_abnormal_reason_.clear();
+      waypoint_start_tracker_.reset();
+      waypoint_arrival_tracker_.reset();
+      publish_result(
+        command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+        "无人机异常状态已清除");
+      response->accepted = true;
+      response->message = "无人机异常状态已清除";
+      break;
+    default:
+      response->message = "未知飞行命令";
+      break;
+  }
+}
+
+void OnboardControlNode::on_execute_waypoints(
+  const std::shared_ptr<ExecuteWaypoints::Request> request,
+  std::shared_ptr<ExecuteWaypoints::Response> response)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::string reason;
+  if (!validate_envelope(request->stamp, request->ttl_ms, request->source_id, reason) ||
+    !authorize_flight_sequence(request->source_id, request->sequence, reason))
+  {
+    response->message = reason;
+    return;
+  }
+  if (!fcu_connected_ || !pose_valid_) {
+    response->message = "飞控或本地位置尚未就绪";
+    return;
+  }
+  if (!thrust_mode_verified_) {
+    response->message = "尚未确认 GUID_OPTIONS=8，拒绝航点姿态/推力控制";
+    return;
+  }
+  if (request->waypoints.empty() || request->waypoints.size() > kMaximumWaypoints) {
+    response->message = "航点数量必须在 1 到 256 之间";
+    return;
+  }
+  for (const auto & waypoint : request->waypoints) {
+    if (!finite_waypoint(waypoint) || waypoint.position.z < 0.1 || waypoint.position.z > 50.0) {
+      response->message = "航点包含非法数值，Z 必须在 [0.1, 50] 米范围内";
+      return;
+    }
+  }
+
+  if (request->reference_generator > ExecuteWaypoints::Request::REFERENCE_JERK_LIMITED_S_CURVE) {
+    response->message = "未知命令生成方式";
+    return;
+  }
+  if (request->tracking_controller > ExecuteWaypoints::Request::TRACKING_TRAJECTORY_PD_DOB) {
+    response->message = "未知跟踪控制方式";
+    return;
+  }
+
+  const auto requested_reference_generator =
+    static_cast<ReferenceGeneratorType>(request->reference_generator);
+  const auto requested_tracking_controller =
+    static_cast<TrackingControllerType>(request->tracking_controller);
+  if (waypoint_configuration_change_locked(
+      request->flight_strategy,
+      requested_reference_generator,
+      requested_tracking_controller))
+  {
+    response->message = "飞行过程中禁止修改避障策略、命令生成或跟踪控制；请先降落并解除武装";
+    return;
+  }
+
+  // 策略接口已预留；仅 STRAIGHT 有实现，其余暂按直线飞行。
+  waypoint_flight_strategy_ = request->flight_strategy;
+  if (waypoint_flight_strategy_ != ExecuteWaypoints::Request::STRATEGY_STRAIGHT) {
+    RCLCPP_WARN(
+      get_logger(),
+      "航点飞行策略 %u 尚未实现，按直线飞行执行",
+      static_cast<unsigned>(waypoint_flight_strategy_));
+    waypoint_flight_strategy_ = ExecuteWaypoints::Request::STRATEGY_STRAIGHT;
+  }
+
+  CommandIdentity command{request->source_id, request->sequence, "waypoints"};
+  cancel_active_task("旧任务已被新的航点任务覆盖");
+  lock_waypoint_configuration(
+    request->flight_strategy,
+    requested_reference_generator,
+    requested_tracking_controller);
+  start_waypoint_task(
+    command, request->waypoints,
+    requested_reference_generator,
+    requested_tracking_controller);
+  response->accepted = true;
+  response->message = "航点任务已上传至机载执行器";
+}
+
+void OnboardControlNode::on_set_gps_origin(
+  const std::shared_ptr<SetGpsOrigin::Request> request,
+  std::shared_ptr<SetGpsOrigin::Response> response)
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  std::string reason;
+  if (!validate_envelope(request->stamp, request->ttl_ms, request->source_id, reason) ||
+    !authorize_flight_sequence(request->source_id, request->sequence, reason))
+  {
+    response->message = reason;
+    return;
+  }
+  const auto & origin = request->origin;
+  if (!std::isfinite(origin.latitude) || !std::isfinite(origin.longitude) ||
+    !std::isfinite(origin.altitude) || origin.latitude < -90.0 || origin.latitude > 90.0 ||
+    origin.longitude < -180.0 || origin.longitude > 180.0)
+  {
+    response->message = "GPS 原点经纬高非法";
+    return;
+  }
+  if (origin_confirmation_active_) {
+    response->message = "已有 GPS 原点请求正在等待飞控回读确认";
+    return;
+  }
+  const CommandIdentity command{
+    request->source_id, request->sequence, "set_gp_origin"};
+  if (fcu_connected_ && global_origin_observed_ &&
+    origins_match(origin, last_global_origin_))
+  {
+    // MAVROS 的 gp_origin 是 transient-local 的已应用状态。ArduPilot 在原点
+    // 未变化时不会保证再次广播；已有匹配回读应作为幂等成功，而非伪造超时。
+    std::ostringstream stream;
+    stream << "GPS 原点已由飞控回读确认，当前值已匹配，无需重复写入 (lat="
+           << last_global_origin_.latitude << ", lon=" << last_global_origin_.longitude
+           << ", alt=" << last_global_origin_.altitude << ")";
+    set_status_message(stream.str());
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+      stream.str());
+    response->accepted = true;
+    response->message = stream.str();
+    return;
+  }
+  if (origin_publisher_->get_subscription_count() == 0U) {
+    response->message = "MAVROS GPS 原点订阅尚未就绪";
+    return;
+  }
+
+  geographic_msgs::msg::GeoPointStamped message;
+  message.header.frame_id = "map";
+  message.position = origin;
+  origin_command_ = command;
+  requested_origin_ = origin;
+  origin_confirmation_active_ = true;
+  origin_confirmation_started_ = SteadyClock::now();
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    message.header.stamp = get_clock()->now();
+    origin_publisher_->publish(message);
+  }
+  std::ostringstream stream;
+  stream << "GPS 原点请求已发布，等待飞控回读确认 (lat=" << origin.latitude
+         << ", lon=" << origin.longitude << ", alt=" << origin.altitude << ")";
+  set_status_message(stream.str());
+  publish_result(
+    origin_command_, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    stream.str());
+  response->accepted = true;
+  response->message = stream.str();
+}
+
+void OnboardControlNode::start_takeoff(
+  const CommandIdentity & command, const double altitude)
+{
+  cancel_active_task("旧任务已被起飞命令覆盖");
+  active_command_ = command;
+  active_task_ = ActiveTask::kTakeoff;
+  active_task_started_ = SteadyClock::now();
+  takeoff_altitude_ = altitude;
+  control_mode_ = guided_interfaces::msg::ControlStatus::MODE_TAKEOFF;
+  controller_engaged_ = true;
+  clear_failsafe_locked();
+  publish_result(
+    command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    "机载端正在切换 GUIDED、武装并起飞");
+  ensure_guided_and_armed(command, [this, command]() {send_takeoff_request(command);});
+}
+
+void OnboardControlNode::start_waypoint_task(
+  const CommandIdentity & command,
+  const std::vector<guided_interfaces::msg::Waypoint> & waypoints,
+  const ReferenceGeneratorType reference_generator,
+  const TrackingControllerType tracking_controller)
+{
+  active_command_ = command;
+  active_task_ = ActiveTask::kWaypoint;
+  active_task_started_ = SteadyClock::now();
+  waypoints_ = waypoints;
+  waypoint_index_ = 0;
+  waypoint_start_tracker_.reset();
+  waypoint_start_pending_ = false;
+  waypoint_arrival_tracker_.reset();
+  active_reference_generator_ = reference_generator;
+  active_tracking_controller_ = tracking_controller;
+  reference_generator_ = make_reference_generator(
+    active_reference_generator_, reference_generator_parameters_);
+  generator_waypoint_initialized_ = false;
+  controller_engaged_ = true;
+  clear_failsafe_locked();
+  publish_result(
+    command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    "机载端正在准备航点任务", 0, static_cast<std::uint32_t>(waypoints_.size()));
+
+  ensure_guided_and_armed(
+    command,
+    [this, command]() {
+      if (!active_task_matches(command) || waypoints_.empty()) {
+        return;
+      }
+      if (active_reference_generator_ == ReferenceGeneratorType::kStepPosition) {
+        activate_waypoint_execution(command);
+        return;
+      }
+
+      // 平滑生成器先抓取当前位置并制动悬停；速度门控由控制周期持续重判，
+      // 不再因起飞终态仍有余速而把整条巡检组合直接判为失败。
+      reference_.position = vehicle_.position;
+      reference_.velocity.setZero();
+      reference_.acceleration.setZero();
+      reference_.yaw = yaw_;
+      target_yaw_rate_ = 0.0;
+      activate_tracking_controller(active_tracking_controller_);
+      control_mode_ = guided_interfaces::msg::ControlStatus::MODE_HOVER;
+      waypoint_start_pending_ = true;
+      update_waypoint_start(SteadyClock::now());
+    });
+}
+
+void OnboardControlNode::update_waypoint_start(const SteadyTime & now)
+{
+  if (!waypoint_start_pending_ || active_task_ != ActiveTask::kWaypoint ||
+    waypoints_.empty())
+  {
+    return;
+  }
+
+  const double speed = vehicle_.velocity.norm();
+  const bool speed_satisfied = velocity_valid_ && std::isfinite(speed) &&
+    speed <= waypoint_start_speed_tolerance_;
+  const int previous_failures = waypoint_start_tracker_.failure_count();
+  const WaypointStartState state = waypoint_start_tracker_.update(now, speed_satisfied);
+  if (state == WaypointStartState::kReady) {
+    activate_waypoint_execution(active_command_);
+    return;
+  }
+  if (waypoint_start_tracker_.failure_count() <= previous_failures) {
+    return;
+  }
+
+  std::ostringstream message;
+  if (state == WaypointStartState::kAbnormal) {
+    message << "无人机状态异常：平滑航点任务启动速度连续 "
+            << waypoint_start_tracker_.failure_count() << " 次不符合要求，当前速度 "
+            << speed << " m/s，阈值 " << waypoint_start_speed_tolerance_ << " m/s";
+    if (!vehicle_abnormal_) {
+      vehicle_abnormal_ = true;
+      vehicle_abnormal_reason_ = message.str();
+    }
+    set_status_message(message.str(), StatusLogLevel::kError);
+  } else {
+    message << "平滑航点任务启动速度判定 "
+            << waypoint_start_tracker_.failure_count() << "/"
+            << waypoint_start_failure_limit_ << " 未通过：当前速度 " << speed
+            << " m/s，阈值 " << waypoint_start_speed_tolerance_
+            << " m/s；机载端保持悬停并继续重试";
+    set_status_message(message.str(), StatusLogLevel::kWarn);
+  }
+  // 只发布非终态进度；第 10 次由 ControlStatus 异常边沿触发既有返航组合。
+  publish_result(
+    active_command_, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    message.str(), 0, static_cast<std::uint32_t>(waypoints_.size()));
+}
+
+void OnboardControlNode::activate_waypoint_execution(const CommandIdentity & command)
+{
+  if (!active_task_matches(command) || waypoints_.empty()) {
+    return;
+  }
+  waypoint_start_pending_ = false;
+  waypoint_start_tracker_.reset();
+  reference_.position = vehicle_.position;
+  reference_.velocity.setZero();
+  reference_.acceleration.setZero();
+  reference_.yaw = yaw_;
+  target_yaw_rate_ = 0.0;
+  activate_tracking_controller(active_tracking_controller_);
+  initialize_waypoint_segment();
+  control_mode_ = guided_interfaces::msg::ControlStatus::MODE_WAYPOINT;
+  std::ostringstream stream;
+  stream << "航点任务已在机载端启动，共 " << waypoints_.size()
+         << " 个航点，命令生成=" << static_cast<unsigned>(active_reference_generator_)
+         << "，跟踪控制=" << static_cast<unsigned>(active_tracking_controller_);
+  set_status_message(stream.str());
+  publish_result(
+    command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    stream.str(), 1, static_cast<std::uint32_t>(waypoints_.size()));
+}
+
+void OnboardControlNode::start_land(const CommandIdentity & command, const bool failsafe)
+{
+  cancel_active_task(failsafe ? "任务因机载安全保护取消" : "当前任务已被降落命令覆盖");
+  active_command_ = command;
+  active_task_ = ActiveTask::kLand;
+  active_task_started_ = SteadyClock::now();
+  control_mode_ = guided_interfaces::msg::ControlStatus::MODE_LAND;
+  controller_engaged_ = false;
+  reference_.velocity.setZero();
+  reference_.acceleration.setZero();
+  target_yaw_rate_ = 0.0;
+  reset_waypoint_reference_state();
+  controller_.reset();
+  if (!failsafe) {
+    clear_failsafe_locked();
+  }
+  publish_result(
+    command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    failsafe ? "机载失联/健康保护正在切换 LAND" : "机载端正在切换 LAND");
+  send_land_mode_request(command, failsafe);
+}
+
+void OnboardControlNode::enter_hover(
+  const std::string & reason, const std::uint8_t mode,
+  const StatusLogLevel log_level)
+{
+  reference_.position = vehicle_.position;
+  reference_.velocity.setZero();
+  reference_.acceleration.setZero();
+  reference_.yaw = yaw_;
+  target_yaw_rate_ = 0.0;
+  reset_waypoint_reference_state();
+  activate_tracking_controller(TrackingControllerType::kPositionPdDob);
+  control_mode_ = mode;
+  controller_engaged_ = armed_;
+  set_status_message(reason, log_level);
+}
+
+void OnboardControlNode::activate_tracking_controller(const TrackingControllerType type)
+{
+  const ControllerParameters & profile =
+    type == TrackingControllerType::kTrajectoryPdDob ?
+    trajectory_controller_parameters_ : controller_parameters_;
+  if (!controller_.set_gain_profile(profile)) {
+    throw std::runtime_error("无法激活非法 PD+DOB 增益配置");
+  }
+  active_tracking_controller_ = type;
+}
+
+void OnboardControlNode::reset_waypoint_reference_state()
+{
+  reference_generator_.reset();
+  generator_waypoint_initialized_ = false;
+  generator_waypoint_index_ = 0;
+  waypoint_start_pending_ = false;
+  waypoint_start_tracker_.reset();
+  waypoint_arrival_tracker_.reset();
+  active_reference_generator_ = ReferenceGeneratorType::kStepPosition;
+  active_reference_phase_ = ReferencePhase::kIdle;
+}
+
+bool OnboardControlNode::waypoint_configuration_change_locked(
+  const std::uint8_t flight_strategy,
+  const ReferenceGeneratorType reference_generator,
+  const TrackingControllerType tracking_controller) const
+{
+  // 未武装时允许 GUI 为下一次起飞重新选择；武装后只接受首次锁定的同一组合。
+  if (!armed_) {
+    return false;
+  }
+  return
+    (armed_flight_strategy_lock_.has_value() &&
+    *armed_flight_strategy_lock_ != flight_strategy) ||
+    (armed_reference_generator_lock_.has_value() &&
+    *armed_reference_generator_lock_ != reference_generator) ||
+    (armed_tracking_controller_lock_.has_value() &&
+    *armed_tracking_controller_lock_ != tracking_controller);
+}
+
+void OnboardControlNode::lock_waypoint_configuration(
+  const std::uint8_t flight_strategy,
+  const ReferenceGeneratorType reference_generator,
+  const TrackingControllerType tracking_controller)
+{
+  armed_flight_strategy_lock_ = flight_strategy;
+  armed_reference_generator_lock_ = reference_generator;
+  armed_tracking_controller_lock_ = tracking_controller;
+}
+
+void OnboardControlNode::clear_waypoint_configuration_lock()
+{
+  armed_flight_strategy_lock_.reset();
+  armed_reference_generator_lock_.reset();
+  armed_tracking_controller_lock_.reset();
+}
+
+void OnboardControlNode::initialize_waypoint_segment()
+{
+  if (!reference_generator_ || waypoint_index_ >= waypoints_.size()) {
+    return;
+  }
+  const auto & waypoint = waypoints_[waypoint_index_];
+  const Eigen::Vector3d target(
+    waypoint.position.x, waypoint.position.y, waypoint.position.z);
+  reference_generator_->reset(
+    reference_.position, reference_.yaw, target, normalize_angle(waypoint.yaw));
+  const GeneratedReference generated = reference_generator_->sample();
+  reference_ = generated.control;
+  target_yaw_rate_ = generated.yaw_rate;
+  active_reference_phase_ = generated.phase;
+  generator_waypoint_index_ = waypoint_index_;
+  generator_waypoint_initialized_ = true;
+}
+
+void OnboardControlNode::cancel_active_task(const std::string & reason)
+{
+  if (active_task_ == ActiveTask::kTakeoff || active_task_ == ActiveTask::kWaypoint) {
+    publish_result(
+      active_command_, guided_interfaces::msg::CommandResult::STATUS_CANCELLED, true,
+      reason, static_cast<std::uint32_t>(waypoint_index_ + 1),
+      static_cast<std::uint32_t>(waypoints_.size()));
+  }
+  active_task_ = ActiveTask::kNone;
+  waypoints_.clear();
+  waypoint_index_ = 0;
+  reset_waypoint_reference_state();
+  if (!armed_) {
+    // 武装前失败/取消不得迫使操作者起飞再降落才能更改实验配置。
+    clear_waypoint_configuration_lock();
+  }
+}
+
+void OnboardControlNode::fail_active_task(const std::string & reason, const bool request_land)
+{
+  const CommandIdentity failed = active_command_;
+  active_task_ = ActiveTask::kNone;
+  waypoints_.clear();
+  reset_waypoint_reference_state();
+  if (!armed_) {
+    clear_waypoint_configuration_lock();
+  }
+  publish_result(
+    failed, guided_interfaces::msg::CommandResult::STATUS_FAILED, true, reason);
+  set_status_message(reason, StatusLogLevel::kError);
+  if (request_land && armed_) {
+    trigger_failsafe_land(reason);
+  } else if (armed_ && pose_valid_ && autopilot_mode_ == "GUIDED") {
+    enter_hover(
+      "命令失败，机载端保持当前位置",
+      guided_interfaces::msg::ControlStatus::MODE_HOVER,
+      StatusLogLevel::kWarn);
+  } else {
+    control_mode_ = guided_interfaces::msg::ControlStatus::MODE_IDLE;
+    controller_engaged_ = false;
+  }
+}
+
+void OnboardControlNode::clear_failsafe_locked()
+{
+  failsafe_reason_.clear();
+  link_loss_started_.reset();
+  failsafe_land_requested_ = false;
+}
+
+bool OnboardControlNode::active_task_matches(const CommandIdentity & command) const
+{
+  return active_task_ != ActiveTask::kNone && active_command_.source == command.source &&
+         active_command_.sequence == command.sequence;
+}
+
+void OnboardControlNode::ensure_guided_and_armed(
+  const CommandIdentity & command,
+  const std::function<void()> & on_ready)
+{
+  if (!active_task_matches(command)) {
+    return;
+  }
+  if (autopilot_mode_ == "GUIDED") {
+    ensure_armed(command, on_ready);
+    return;
+  }
+  if (!set_mode_client_->service_is_ready()) {
+    fail_active_task("MAVROS 模式服务不可用", false);
+    return;
+  }
+
+  auto request = std::make_shared<mavros_msgs::srv::SetMode::Request>();
+  request->custom_mode = "GUIDED";
+  set_mode_client_->async_send_request(
+    request,
+    [this, command, on_ready](rclcpp::Client<mavros_msgs::srv::SetMode>::SharedFuture future) {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!active_task_matches(command)) {
+        return;
+      }
+      try {
+        const auto response = future.get();
+        if (!response || !response->mode_sent) {
+          fail_active_task("飞控拒绝 GUIDED 模式", false);
+          return;
+        }
+      } catch (const std::exception & error) {
+        fail_active_task(std::string("GUIDED 服务异常: ") + error.what(), false);
+        return;
+      }
+      ensure_armed(command, on_ready);
+    });
+}
+
+void OnboardControlNode::ensure_armed(
+  const CommandIdentity & command,
+  const std::function<void()> & on_ready)
+{
+  if (!active_task_matches(command)) {
+    return;
+  }
+  if (armed_) {
+    on_ready();
+    return;
+  }
+  if (!arming_client_->service_is_ready()) {
+    fail_active_task("MAVROS 武装服务不可用", false);
+    return;
+  }
+
+  auto request = std::make_shared<mavros_msgs::srv::CommandBool::Request>();
+  request->value = true;
+  arming_client_->async_send_request(
+    request,
+    [this, command, on_ready](rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedFuture future) {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!active_task_matches(command)) {
+        return;
+      }
+      try {
+        const auto response = future.get();
+        if (!response || !response->success) {
+          fail_active_task("飞控拒绝武装，请检查 PreArm 状态", false);
+          return;
+        }
+      } catch (const std::exception & error) {
+        fail_active_task(std::string("武装服务异常: ") + error.what(), false);
+        return;
+      }
+      on_ready();
+    });
+}
+
+void OnboardControlNode::send_takeoff_request(const CommandIdentity & command)
+{
+  if (!active_task_matches(command)) {
+    return;
+  }
+  if (!takeoff_client_->service_is_ready()) {
+    fail_active_task("MAVROS 起飞服务不可用", true);
+    return;
+  }
+  auto request = std::make_shared<mavros_msgs::srv::CommandTOL::Request>();
+  request->altitude = static_cast<float>(takeoff_altitude_);
+  request->min_pitch = 0.0F;
+  request->yaw = 0.0F;
+  request->latitude = 0.0F;
+  request->longitude = 0.0F;
+  takeoff_client_->async_send_request(
+    request,
+    [this, command](rclcpp::Client<mavros_msgs::srv::CommandTOL>::SharedFuture future) {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!active_task_matches(command)) {
+        return;
+      }
+      try {
+        const auto response = future.get();
+        if (!response || !response->success) {
+          fail_active_task("飞控拒绝起飞指令", true);
+          return;
+        }
+      } catch (const std::exception & error) {
+        fail_active_task(std::string("起飞服务异常: ") + error.what(), true);
+        return;
+      }
+      active_task_started_ = SteadyClock::now();
+      set_status_message("起飞指令已接受，机载端正在确认高度");
+    });
+}
+
+void OnboardControlNode::send_land_mode_request(
+  const CommandIdentity & command, const bool failsafe)
+{
+  if (!set_mode_client_->service_is_ready()) {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_FAILED, true,
+      "MAVROS 模式服务不可用，无法发送 LAND");
+    active_task_ = ActiveTask::kNone;
+    if (failsafe) {
+      failsafe_land_requested_ = false;
+    }
+    return;
+  }
+  auto request = std::make_shared<mavros_msgs::srv::SetMode::Request>();
+  request->custom_mode = "LAND";
+  set_mode_client_->async_send_request(
+    request,
+    [this, command, failsafe](rclcpp::Client<mavros_msgs::srv::SetMode>::SharedFuture future) {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!active_task_matches(command)) {
+        return;
+      }
+      bool success = false;
+      std::string failure;
+      try {
+        const auto response = future.get();
+        success = response && response->mode_sent;
+        if (!success) {
+          failure = "飞控拒绝 LAND 模式";
+        }
+      } catch (const std::exception & error) {
+        failure = std::string("LAND 服务异常: ") + error.what();
+      }
+      if (!success) {
+        active_task_ = ActiveTask::kNone;
+        publish_result(
+          command, guided_interfaces::msg::CommandResult::STATUS_FAILED, true, failure);
+        set_status_message(failure, StatusLogLevel::kError);
+        if (failsafe) {
+          failsafe_land_requested_ = false;
+        }
+        return;
+      }
+      active_task_started_ = SteadyClock::now();
+      control_mode_ = guided_interfaces::msg::ControlStatus::MODE_LAND;
+      const std::string message =
+        failsafe ? "机载安全保护已切换 LAND" : "降落指令已发送 — LAND 模式";
+      set_status_message(
+        message, failsafe ? StatusLogLevel::kError : StatusLogLevel::kInfo);
+      publish_result(
+        command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+        message);
+    });
+}
+
+void OnboardControlNode::start_message_rate_configuration(
+  const CommandIdentity & command, const bool publish_command_result)
+{
+  message_rate_configuration_active_ = true;
+  message_rates_configured_ = false;
+  message_rate_publish_result_ = publish_command_result;
+  message_rate_command_ = command;
+  message_rate_index_ = 0;
+  if (message_rate_publish_result_) {
+    publish_result(
+      command, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+      "机载端正在配置 MAVLink 消息频率");
+  }
+  send_next_message_rate();
+}
+
+void OnboardControlNode::send_next_message_rate()
+{
+  if (!message_rate_configuration_active_) {
+    return;
+  }
+  if (message_rate_index_ >= kMessageIntervals.size()) {
+    message_rate_configuration_active_ = false;
+    message_rates_configured_ = true;
+    if (message_rate_publish_result_) {
+      publish_result(
+        message_rate_command_, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED,
+        true, "飞控已接受 MAVLink 本地位置/姿态/IMU 100 Hz 与电池状态 1 Hz 配置请求");
+    }
+    set_status_message("MAVLink 遥测消息频率配置请求已被飞控接受");
+    return;
+  }
+
+  const auto [message_id, rate] = kMessageIntervals[message_rate_index_];
+  auto request = std::make_shared<mavros_msgs::srv::MessageInterval::Request>();
+  request->message_id = message_id;
+  request->message_rate = rate;
+  message_interval_client_->async_send_request(
+    request,
+    [this, message_id](rclcpp::Client<mavros_msgs::srv::MessageInterval>::SharedFuture future) {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!message_rate_configuration_active_) {
+        return;
+      }
+      bool success = false;
+      try {
+        const auto response = future.get();
+        success = response && response->success;
+      } catch (const std::exception &) {
+        success = false;
+      }
+      if (!success) {
+        message_rate_configuration_active_ = false;
+        std::ostringstream stream;
+        stream << "飞控拒绝消息 " << message_id << " 的频率配置";
+        if (message_rate_publish_result_) {
+          publish_result(
+            message_rate_command_, guided_interfaces::msg::CommandResult::STATUS_FAILED,
+            true, stream.str());
+        }
+        set_status_message(stream.str(), StatusLogLevel::kWarn);
+        return;
+      }
+      ++message_rate_index_;
+      send_next_message_rate();
+    });
+}
+
+void OnboardControlNode::check_thrust_mode_parameter()
+{
+  if (thrust_mode_check_inflight_ || !fcu_parameter_client_->service_is_ready()) {
+    return;
+  }
+  thrust_mode_check_inflight_ = true;
+  last_thrust_mode_check_ = SteadyClock::now();
+  fcu_parameter_client_->get_parameters(
+    {"GUID_OPTIONS", "MOT_THST_HOVER"},
+    [this](std::shared_future<std::vector<rclcpp::Parameter>> future) {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      thrust_mode_check_inflight_ = false;
+      try {
+        const auto parameters = future.get();
+        if (!fcu_connected_) {
+          return;
+        }
+        if (parameters.size() != 2U || parameters.front().get_type() !=
+          rclcpp::ParameterType::PARAMETER_INTEGER || parameters[1].get_type() !=
+          rclcpp::ParameterType::PARAMETER_DOUBLE)
+        {
+          // An incomplete MAVROS parameter pull is expected shortly after FCU connection.
+          // A verified in-flight controller is not invalidated by one transient read failure.
+          if (!thrust_mode_verified_) {
+            const SteadyTime now = SteadyClock::now();
+            if (fcu_parameter_sync_started_ == SteadyTime{}) {
+              fcu_parameter_sync_started_ = now;
+            }
+            if (now - fcu_parameter_sync_started_ < kFcuParameterSyncGracePeriod) {
+              set_status_message(
+                "等待 MAVROS 完成飞控参数同步，姿态/推力控制暂未启用",
+                StatusLogLevel::kDebug);
+            } else {
+              set_status_message(
+                "MAVROS 参数同步超时，无法读取 GUID_OPTIONS 与 MOT_THST_HOVER",
+                StatusLogLevel::kWarn);
+            }
+          }
+          return;
+        }
+        const bool was_verified = thrust_mode_verified_;
+        const std::int64_t options = parameters.front().as_int();
+        const double hover_throttle = parameters[1].as_double();
+        const bool hover_valid = controller_.set_hover_throttle(hover_throttle);
+        if (hover_valid) {
+          controller_parameters_.hover_throttle = hover_throttle;
+        }
+        thrust_mode_verified_ = (options & 8) != 0 && hover_valid;
+        if (thrust_mode_verified_ && !was_verified) {
+          std::ostringstream stream;
+          stream << "已确认 GUID_OPTIONS bit 3，并同步 MOT_THST_HOVER="
+                 << hover_throttle;
+          set_status_message(stream.str());
+        } else if ((options & 8) == 0) {
+          set_status_message(
+            "GUID_OPTIONS bit 3 未启用：请设置 GUID_OPTIONS=8",
+            StatusLogLevel::kWarn);
+        } else if (!hover_valid) {
+          set_status_message(
+            "飞控 MOT_THST_HOVER 非法，姿态/推力控制保持禁用",
+            StatusLogLevel::kWarn);
+        }
+      } catch (const std::exception & error) {
+        if (!thrust_mode_verified_) {
+          set_status_message(
+            std::string("读取飞控推力参数失败: ") + error.what(),
+            StatusLogLevel::kWarn);
+        }
+      }
+    });
+}
+
+void OnboardControlNode::control_tick()
+{
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  const SteadyTime now = SteadyClock::now();
+  const double expected_period = 1.0 / control_frequency_hz_;
+  double dt_seconds = expected_period;
+  if (last_control_tick_ != SteadyTime{}) {
+    dt_seconds = std::chrono::duration<double>(now - last_control_tick_).count();
+    if (dt_seconds > 0.0) {
+      const double instantaneous_rate = 1.0 / dt_seconds;
+      measured_control_rate_hz_ = measured_control_rate_hz_ == 0.0 ? instantaneous_rate :
+        0.98 * measured_control_rate_hz_ + 0.02 * instantaneous_rate;
+      const double jitter_ms = std::abs(dt_seconds - expected_period) * 1000.0;
+      max_jitter_ms_ = std::max(max_jitter_ms_, jitter_ms);
+      if (dt_seconds > expected_period * 1.5) {
+        ++deadline_miss_count_;
+      }
+    }
+  }
+  last_control_tick_ = now;
+
+  enforce_safety(now);
+
+  if (active_task_ == ActiveTask::kTakeoff) {
+    const double threshold = std::max(0.1, takeoff_altitude_ - 0.1);
+    if (armed_ && pose_valid_ && vehicle_.position.z() >= threshold) {
+      const CommandIdentity completed = active_command_;
+      active_task_ = ActiveTask::kNone;
+      enter_hover("起飞完成，机载 PD+DOB 已进入悬停");
+      // 起飞服务只负责把飞机送入安全高度，最终请求高度仍由同一 PD+DOB 精确保持。
+      reference_.position.z() = takeoff_altitude_;
+      publish_result(
+        completed, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+        "起飞成功，机载 PD+DOB 已进入悬停");
+    } else if (
+      std::chrono::duration<double>(now - active_task_started_).count() >
+      takeoff_timeout_seconds_)
+    {
+      fail_active_task("起飞高度确认超时", true);
+    }
+  }
+  if (active_task_ == ActiveTask::kLand &&
+    std::chrono::duration<double>(now - active_task_started_).count() >
+    land_confirmation_timeout_seconds_)
+  {
+    const CommandIdentity timed_out = active_command_;
+    active_task_ = ActiveTask::kNone;
+    std::ostringstream stream;
+    stream << "LAND 模式已发送，但 " << land_confirmation_timeout_seconds_
+           << " 秒内未观察到解除武装";
+    publish_result(
+      timed_out, guided_interfaces::msg::CommandResult::STATUS_FAILED, true,
+      stream.str());
+    set_status_message(stream.str(), StatusLogLevel::kError);
+  }
+
+  if (active_task_ == ActiveTask::kWaypoint && waypoint_start_pending_) {
+    update_waypoint_start(now);
+  }
+  if (control_mode_ == guided_interfaces::msg::ControlStatus::MODE_MOTION) {
+    update_motion_reference(dt_seconds);
+  } else if (control_mode_ == guided_interfaces::msg::ControlStatus::MODE_WAYPOINT) {
+    update_waypoint_executor(now, dt_seconds);
+  }
+
+  if (control_mode_ == guided_interfaces::msg::ControlStatus::MODE_MOTION ||
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_HOVER ||
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_WAYPOINT ||
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_FAILSAFE_HOLD)
+  {
+    publish_attitude_setpoint(dt_seconds);
+  }
+}
+
+void OnboardControlNode::update_motion_reference(const double dt_seconds)
+{
+  reference_.acceleration.setZero();
+  reference_.position += reference_.velocity * dt_seconds;
+  reference_.yaw = normalize_angle(reference_.yaw + target_yaw_rate_ * dt_seconds);
+
+  // 虚拟目标不允许无限跑离机体，以免网络抖动后产生过大的追赶加速度。
+  Eigen::Vector2d horizontal_error =
+    reference_.position.head<2>() - vehicle_.position.head<2>();
+  if (horizontal_error.norm() > max_reference_error_xy_) {
+    horizontal_error *= max_reference_error_xy_ / horizontal_error.norm();
+    reference_.position.x() = vehicle_.position.x() + horizontal_error.x();
+    reference_.position.y() = vehicle_.position.y() + horizontal_error.y();
+  }
+  reference_.position.z() = std::clamp(
+    reference_.position.z(),
+    vehicle_.position.z() - max_reference_error_z_,
+    vehicle_.position.z() + max_reference_error_z_);
+  reference_.position.z() = std::max(reference_.position.z(), 0.1);
+}
+
+void OnboardControlNode::update_waypoint_executor(
+  const SteadyTime & now, const double dt_seconds)
+{
+  if (active_task_ != ActiveTask::kWaypoint || waypoint_index_ >= waypoints_.size()) {
+    return;
+  }
+
+  if (!generator_waypoint_initialized_ || generator_waypoint_index_ != waypoint_index_) {
+    initialize_waypoint_segment();
+  }
+  if (!reference_generator_) {
+    fail_active_task("航点参考生成器未初始化", false);
+    return;
+  }
+
+  const GeneratedReference generated = reference_generator_->update(dt_seconds);
+  reference_ = generated.control;
+  target_yaw_rate_ = generated.yaw_rate;
+  active_reference_phase_ = generated.phase;
+  const auto & waypoint = waypoints_[waypoint_index_];
+  const Eigen::Vector3d target(
+    waypoint.position.x, waypoint.position.y, waypoint.position.z);
+
+  const double distance = (vehicle_.position - target).norm();
+  const bool baseline = active_reference_generator_ == ReferenceGeneratorType::kStepPosition;
+  const bool reference_ready = baseline || generated.finished;
+  const bool attempt_candidate = reference_ready && distance < waypoint_tolerance_;
+  const bool arrival_satisfied = attempt_candidate &&
+    vehicle_.velocity.norm() <= waypoint_arrival_speed_tolerance_;
+  const int previous_failures = waypoint_arrival_tracker_.failure_count();
+  const WaypointArrivalState arrival = waypoint_arrival_tracker_.update(
+    now, attempt_candidate, arrival_satisfied, waypoint_hold_seconds_);
+  if (waypoint_arrival_tracker_.failure_count() > previous_failures &&
+    arrival != WaypointArrivalState::kAbnormal)
+  {
+    std::ostringstream retry;
+    retry << "航点 " << waypoint_index_ + 1 << "/" << waypoints_.size()
+          << " 入点尝试失败 " << waypoint_arrival_tracker_.failure_count()
+          << "/" << waypoint_arrival_failure_limit_
+          << "，继续保持当前航点并等待稳定";
+    set_status_message(retry.str(), StatusLogLevel::kWarn);
+  }
+  if (arrival == WaypointArrivalState::kAbnormal && !vehicle_abnormal_) {
+    std::ostringstream reason;
+    reason << "无人机状态异常：航点 " << waypoint_index_ + 1 << "/"
+           << waypoints_.size() << " 连续入点失败 "
+           << waypoint_arrival_tracker_.failure_count() << " 次，distance="
+           << distance << " m, speed=" << vehicle_.velocity.norm() << " m/s";
+    vehicle_abnormal_ = true;
+    vehicle_abnormal_reason_ = reason.str();
+    set_status_message(vehicle_abnormal_reason_, StatusLogLevel::kError);
+    // 只标记异常并继续保持当前航点；返航组合由地面站根据权威状态下发。
+  }
+  if (arrival != WaypointArrivalState::kReached) {
+    return;
+  }
+
+  // 到达事件是拍照的唯一权威触发点；先带出当前点元数据，再推进索引。
+  // 发布完全非阻塞，视频服务不存在或失败都不能改变飞行任务终态。
+  publish_waypoint_capture(waypoint);
+  ++waypoint_index_;
+  if (waypoint_index_ >= waypoints_.size()) {
+    const CommandIdentity completed = active_command_;
+    const std::uint32_t count = static_cast<std::uint32_t>(waypoints_.size());
+    active_task_ = ActiveTask::kNone;
+    waypoint_index_ = waypoints_.size() - 1;
+    control_mode_ = guided_interfaces::msg::ControlStatus::MODE_HOVER;
+    reference_.velocity.setZero();
+    reference_.acceleration.setZero();
+    target_yaw_rate_ = 0.0;
+    active_reference_phase_ = ReferencePhase::kComplete;
+    // 末点保持沿用本任务增益，避免刚停稳就跳变；显式悬停/降落/解锁会恢复基线。
+    set_status_message("航点任务完成，机载端保持末航点");
+    publish_result(
+      completed, guided_interfaces::msg::CommandResult::STATUS_SUCCEEDED, true,
+      "航点任务完成，机载端保持末航点", count, count);
+    return;
+  }
+
+  generator_waypoint_initialized_ = false;
+  const auto & next = waypoints_[waypoint_index_];
+  std::ostringstream stream;
+  stream << "前往航点 " << waypoint_index_ + 1 << "/" << waypoints_.size()
+         << " (" << next.position.x << ", " << next.position.y << ", "
+         << next.position.z << ")";
+  set_status_message(stream.str(), StatusLogLevel::kDebug);
+  publish_result(
+    active_command_, guided_interfaces::msg::CommandResult::STATUS_RUNNING, false,
+    stream.str(), static_cast<std::uint32_t>(waypoint_index_ + 1),
+    static_cast<std::uint32_t>(waypoints_.size()));
+}
+
+void OnboardControlNode::enforce_safety(const SteadyTime & now)
+{
+  if (!controller_engaged_ || !armed_) {
+    return;
+  }
+
+  const bool raw_control_mode =
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_MOTION ||
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_HOVER ||
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_WAYPOINT ||
+    control_mode_ == guided_interfaces::msg::ControlStatus::MODE_FAILSAFE_HOLD;
+
+  if (setpoint_conflict_ && raw_control_mode) {
+    trigger_failsafe_land("检测到多个姿态 setpoint 发布者");
+    return;
+  }
+  if (raw_control_mode &&
+    (!fcu_connected_ || last_state_time_ == SteadyTime{} ||
+    std::chrono::duration<double>(now - last_state_time_).count() > state_timeout_seconds_))
+  {
+    trigger_failsafe_land("飞控状态遥测超时或连接中断");
+    return;
+  }
+  if (!thrust_mode_verified_ && raw_control_mode) {
+    trigger_failsafe_land("GUID_OPTIONS bit 3 校验失效");
+    return;
+  }
+  if (raw_control_mode &&
+    (!pose_valid_ || !velocity_valid_ || last_pose_time_ == SteadyTime{} ||
+    last_velocity_time_ == SteadyTime{} ||
+    std::chrono::duration<double>(now - last_pose_time_).count() > pose_timeout_seconds_ ||
+    std::chrono::duration<double>(now - last_velocity_time_).count() > pose_timeout_seconds_))
+  {
+    trigger_failsafe_land("本地位置或速度遥测无效/超时");
+    return;
+  }
+  if (raw_control_mode && autopilot_mode_ != "GUIDED") {
+    controller_engaged_ = false;
+    control_mode_ = guided_interfaces::msg::ControlStatus::MODE_IDLE;
+    active_task_ = ActiveTask::kNone;
+    waypoints_.clear();
+    reset_waypoint_reference_state();
+    activate_tracking_controller(TrackingControllerType::kPositionPdDob);
+    failsafe_reason_ = "飞控模式被外部切换，机载服务已停止发送 setpoint";
+    set_status_message(failsafe_reason_, StatusLogLevel::kError);
+    return;
+  }
+
+  if (!lease_active_locked()) {
+    if (!link_loss_started_.has_value()) {
+      trigger_link_loss_hold(now);
+    }
+    if (link_loss_started_.has_value() &&
+      std::chrono::duration<double>(now - *link_loss_started_).count() >=
+      link_loss_land_timeout_seconds_)
+    {
+      trigger_failsafe_land("地面站控制租约超时，悬停等待期结束");
+    }
+  }
+}
+
+void OnboardControlNode::trigger_link_loss_hold(const SteadyTime & now)
+{
+  cancel_active_task("任务因地面站控制租约超时而取消");
+  link_loss_started_ = now;
+  failsafe_reason_ = "地面站控制租约超时";
+  if (pose_valid_ && autopilot_mode_ == "GUIDED") {
+    enter_hover(
+      "地面站失联：机载端独立悬停，超时后 LAND",
+      guided_interfaces::msg::ControlStatus::MODE_FAILSAFE_HOLD,
+      StatusLogLevel::kWarn);
+  } else {
+    trigger_failsafe_land(failsafe_reason_);
+  }
+}
+
+void OnboardControlNode::trigger_failsafe_land(const std::string & reason)
+{
+  if (failsafe_land_requested_ || control_mode_ == guided_interfaces::msg::ControlStatus::MODE_LAND) {
+    return;
+  }
+  failsafe_reason_ = reason;
+  failsafe_land_requested_ = true;
+  const auto sequence = static_cast<std::uint64_t>(get_clock()->now().nanoseconds());
+  CommandIdentity command{"onboard-failsafe", sequence, "failsafe_land"};
+  start_land(command, true);
+}
+
+void OnboardControlNode::publish_attitude_setpoint(const double dt_seconds)
+{
+  const SteadyTime now = SteadyClock::now();
+  if (!armed_ || autopilot_mode_ != "GUIDED" || !pose_valid_ || !velocity_valid_ ||
+    last_pose_time_ == SteadyTime{} || last_velocity_time_ == SteadyTime{} ||
+    std::chrono::duration<double>(now - last_pose_time_).count() > pose_timeout_seconds_ ||
+    std::chrono::duration<double>(now - last_velocity_time_).count() > pose_timeout_seconds_)
+  {
+    return;
+  }
+
+  const bool use_acceleration_feedforward =
+    active_tracking_controller_ == TrackingControllerType::kTrajectoryPdDob;
+  const ControlOutput output = controller_.compute(
+    vehicle_, reference_, dt_seconds, use_acceleration_feedforward);
+  if (!output.valid) {
+    trigger_failsafe_land("PD+DOB 产生非有限控制输出");
+    return;
+  }
+  mavros_msgs::msg::AttitudeTarget message;
+  message.header.stamp = get_clock()->now();
+  message.orientation.x = output.attitude.x();
+  message.orientation.y = output.attitude.y();
+  message.orientation.z = output.attitude.z();
+  message.orientation.w = output.attitude.w();
+  message.thrust = static_cast<float>(output.thrust);
+  message.type_mask =
+    mavros_msgs::msg::AttitudeTarget::IGNORE_ROLL_RATE |
+    mavros_msgs::msg::AttitudeTarget::IGNORE_PITCH_RATE |
+    mavros_msgs::msg::AttitudeTarget::IGNORE_YAW_RATE;
+  attitude_publisher_->publish(message);
+}
+
+void OnboardControlNode::status_tick()
+{
+  // ROS 图查询可能发生调度抖动，必须放在控制状态互斥锁之外。
+  // SIGINT may invalidate the context between the executor wakeup and graph query.
+  if (!rclcpp::ok()) {
+    return;
+  }
+  std::size_t publisher_count = 0U;
+  try {
+    publisher_count = count_publishers(attitude_topic_);
+  } catch (const std::runtime_error &) {
+    if (!rclcpp::ok()) {
+      return;
+    }
+    throw;
+  }
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
+  const SteadyTime now = SteadyClock::now();
+  check_origin_confirmation_timeout(now);
+  if (fcu_connected_ && fcu_parameter_sync_started_ != SteadyTime{} &&
+    std::chrono::duration<double>(now - fcu_parameter_sync_started_).count() >=
+    fcu_parameter_check_initial_delay_seconds_ &&
+    !thrust_mode_check_inflight_ &&
+    (last_thrust_mode_check_ == SteadyTime{} ||
+    std::chrono::duration<double>(now - last_thrust_mode_check_).count() >= 5.0))
+  {
+    check_thrust_mode_parameter();
+  }
+  if (fcu_connected_ && !message_rates_configured_ &&
+    !message_rate_configuration_active_ && message_interval_client_->service_is_ready() &&
+    (last_automatic_message_rate_attempt_ == SteadyTime{} ||
+    now - last_automatic_message_rate_attempt_ >= kAutomaticMessageRateRetryPeriod))
+  {
+    // Required FCU telemetry is an onboard prerequisite, not a ground-station side effect.
+    last_automatic_message_rate_attempt_ = now;
+    start_message_rate_configuration(
+      CommandIdentity{"onboard-maintenance", 0U, "set_rates"}, false);
+  }
+  if (publisher_count > 1U) {
+    ++conflict_observations_;
+  } else {
+    conflict_observations_ = 0;
+  }
+  setpoint_conflict_ = conflict_observations_ >= 3U;
+
+  guided_interfaces::msg::ControlStatus message;
+  message.header.stamp = get_clock()->now();
+  message.interface_version = kInterfaceVersion;
+  message.fcu_connected = fcu_connected_ && last_state_time_ != SteadyTime{} &&
+    std::chrono::duration<double>(now - last_state_time_).count() <= state_timeout_seconds_;
+  message.armed = armed_;
+  message.autopilot_mode = autopilot_mode_;
+  message.local_position_valid = pose_valid_ && velocity_valid_ &&
+    last_pose_time_ != SteadyTime{} && last_velocity_time_ != SteadyTime{} &&
+    std::chrono::duration<double>(now - last_pose_time_).count() <= pose_timeout_seconds_ &&
+    std::chrono::duration<double>(now - last_velocity_time_).count() <= pose_timeout_seconds_;
+  message.position.x = vehicle_.position.x();
+  message.position.y = vehicle_.position.y();
+  message.position.z = vehicle_.position.z();
+  message.velocity.x = vehicle_.velocity.x();
+  message.velocity.y = vehicle_.velocity.y();
+  message.velocity.z = vehicle_.velocity.z();
+  message.roll = roll_;
+  message.pitch = pitch_;
+  message.yaw = yaw_;
+  const bool battery_fresh = last_battery_time_ != SteadyTime{} &&
+    std::chrono::duration<double>(now - last_battery_time_).count() <=
+    kBatteryMaximumAgeSeconds;
+  message.battery_valid = message.fcu_connected && battery_present_ && battery_fresh &&
+    std::isfinite(battery_voltage_) && battery_voltage_ > 0.0;
+  message.battery_voltage = battery_voltage_;
+  message.battery_current = battery_current_;
+  message.battery_percentage = battery_percentage_;
+  message.control_mode = control_mode_;
+  message.control_mode_label = mode_label(control_mode_);
+  message.controller_active = controller_engaged_;
+  message.target_position.x = reference_.position.x();
+  message.target_position.y = reference_.position.y();
+  message.target_position.z = reference_.position.z();
+  message.target_velocity.x = reference_.velocity.x();
+  message.target_velocity.y = reference_.velocity.y();
+  message.target_velocity.z = reference_.velocity.z();
+  message.target_acceleration.x = reference_.acceleration.x();
+  message.target_acceleration.y = reference_.acceleration.y();
+  message.target_acceleration.z = reference_.acceleration.z();
+  message.target_yaw = reference_.yaw;
+  message.target_yaw_rate = target_yaw_rate_;
+  message.active_reference_generator = static_cast<std::uint8_t>(active_reference_generator_);
+  message.active_tracking_controller = static_cast<std::uint8_t>(active_tracking_controller_);
+  message.reference_phase = static_cast<std::uint8_t>(active_reference_phase_);
+  message.lease_owner = lease_owner_;
+  message.lease_active = lease_active_locked();
+  message.lease_remaining_ms = lease_remaining_ms_locked();
+  message.active_command_sequence = active_command_.sequence;
+  message.waypoint_index = waypoints_.empty() ? 0U :
+    static_cast<std::uint32_t>(std::min(waypoint_index_ + 1, waypoints_.size()));
+  message.waypoint_count = static_cast<std::uint32_t>(waypoints_.size());
+  message.waypoint_arrival_failure_count =
+    static_cast<std::uint32_t>(waypoint_arrival_tracker_.failure_count());
+  message.vehicle_abnormal = vehicle_abnormal_;
+  message.vehicle_abnormal_reason = vehicle_abnormal_reason_;
+  message.message_rates_configured = message_rates_configured_;
+  message.thrust_mode_verified = thrust_mode_verified_;
+  message.hover_throttle = controller_.hover_throttle();
+  message.setpoint_conflict = setpoint_conflict_;
+  message.failsafe_reason = failsafe_reason_;
+  message.status_message = status_message_;
+  message.control_rate_hz = measured_control_rate_hz_;
+  message.max_jitter_ms = max_jitter_ms_;
+  message.deadline_miss_count = deadline_miss_count_;
+  status_publisher_->publish(message);
+}
+
+void OnboardControlNode::publish_result(
+  const CommandIdentity & command,
+  const std::uint8_t status,
+  const bool final,
+  const std::string & message,
+  const std::uint32_t waypoint_index,
+  const std::uint32_t waypoint_count)
+{
+  guided_interfaces::msg::CommandResult result;
+  result.header.stamp = get_clock()->now();
+  result.source_id = command.source;
+  result.sequence = command.sequence;
+  result.command = command.name;
+  result.status = status;
+  result.final = final;
+  result.message = message;
+  result.waypoint_index = waypoint_index;
+  result.waypoint_count = waypoint_count;
+  result_publisher_->publish(result);
+}
+
+void OnboardControlNode::publish_video_control(
+  const bool enabled, const std::string & source, const std::string & reason)
+{
+  guided_interfaces::msg::VideoControl message;
+  message.header.stamp = get_clock()->now();
+  message.source_id = source;
+  message.sequence = ++video_command_sequence_;
+  message.enabled = enabled;
+  message.reason = reason;
+  video_control_publisher_->publish(message);
+  RCLCPP_INFO(
+    get_logger(), "视频期望状态已发布：enabled=%s，reason=%s",
+    enabled ? "true" : "false", reason.c_str());
+}
+
+void OnboardControlNode::publish_waypoint_capture(
+  const guided_interfaces::msg::Waypoint & waypoint)
+{
+  guided_interfaces::msg::VideoCapture message;
+  message.header.stamp = get_clock()->now();
+  message.source_id = active_command_.source;
+  message.sequence = ++video_command_sequence_;
+  message.kind = waypoint.has_photo_no ?
+    guided_interfaces::msg::VideoCapture::KIND_UPSTREAM_WAYPOINT :
+    guided_interfaces::msg::VideoCapture::KIND_GCS_WAYPOINT;
+  message.mission_sequence = active_command_.sequence;
+  message.waypoint_index = static_cast<std::uint32_t>(waypoint_index_ + 1);
+  message.photo_no = waypoint.has_photo_no ? waypoint.photo_no : "";
+  video_capture_publisher_->publish(message);
+}
+
+void OnboardControlNode::check_origin_confirmation_timeout(const SteadyTime & now)
+{
+  if (!origin_confirmation_active_ || origin_confirmation_started_ == SteadyTime{} ||
+    std::chrono::duration<double>(now - origin_confirmation_started_).count() <=
+    kOriginConfirmationTimeoutSeconds)
+  {
+    return;
+  }
+  const CommandIdentity timed_out = origin_command_;
+  origin_confirmation_active_ = false;
+  const std::string failure = "GPS 原点请求已发布，但未收到飞控回读确认";
+  publish_result(
+    timed_out, guided_interfaces::msg::CommandResult::STATUS_FAILED, true, failure);
+  set_status_message(failure, StatusLogLevel::kWarn);
+}
+
+void OnboardControlNode::set_status_message(
+  const std::string & message, const StatusLogLevel level)
+{
+  // 同一状态文字只输出一次；严重度由调用点按用户影响明确选择。
+  if (message.empty() || status_message_ == message) {
+    return;
+  }
+  status_message_ = message;
+  switch (level) {
+    case StatusLogLevel::kDebug:
+      RCLCPP_DEBUG(get_logger(), "%s", message.c_str());
+      break;
+    case StatusLogLevel::kInfo:
+      RCLCPP_INFO(get_logger(), "%s", message.c_str());
+      break;
+    case StatusLogLevel::kWarn:
+      RCLCPP_WARN(get_logger(), "%s", message.c_str());
+      break;
+    case StatusLogLevel::kError:
+      RCLCPP_ERROR(get_logger(), "%s", message.c_str());
+      break;
+  }
+}
+
+std::string OnboardControlNode::mode_label(const std::uint8_t mode)
+{
+  switch (mode) {
+    case guided_interfaces::msg::ControlStatus::MODE_TAKEOFF:
+      return "起飞";
+    case guided_interfaces::msg::ControlStatus::MODE_MOTION:
+      return "键盘运动 PD+DOB";
+    case guided_interfaces::msg::ControlStatus::MODE_HOVER:
+      return "悬停 PD+DOB";
+    case guided_interfaces::msg::ControlStatus::MODE_WAYPOINT:
+      return "航点 PD+DOB";
+    case guided_interfaces::msg::ControlStatus::MODE_LAND:
+      return "降落";
+    case guided_interfaces::msg::ControlStatus::MODE_FAILSAFE_HOLD:
+      return "失联保护悬停";
+    default:
+      return "待机";
+  }
+}
+
+double OnboardControlNode::normalize_angle(double angle)
+{
+  while (angle > kPi) {
+    angle -= 2.0 * kPi;
+  }
+  while (angle < -kPi) {
+    angle += 2.0 * kPi;
+  }
+  return angle;
+}
+
+bool OnboardControlNode::origins_match(
+  const geographic_msgs::msg::GeoPoint & expected,
+  const geographic_msgs::msg::GeoPoint & observed)
+{
+  return std::isfinite(observed.latitude) && std::isfinite(observed.longitude) &&
+         std::isfinite(observed.altitude) &&
+         std::abs(expected.latitude - observed.latitude) <=
+         kOriginHorizontalToleranceDegrees &&
+         std::abs(expected.longitude - observed.longitude) <=
+         kOriginHorizontalToleranceDegrees &&
+         std::abs(expected.altitude - observed.altitude) <=
+         kOriginAltitudeToleranceMeters;
+}
+
+}  // namespace onboard_control

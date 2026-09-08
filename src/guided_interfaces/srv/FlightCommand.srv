@@ -1,0 +1,20 @@
+# Copyright (c) 2026 北京航空航天大学
+# SPDX-License-Identifier: MulanPSL-2.0
+# 起降、悬停、取消和维护命令的统一请求接口。
+uint8 COMMAND_TAKEOFF=1
+uint8 COMMAND_LAND=2
+uint8 COMMAND_HOVER=3
+uint8 COMMAND_CANCEL=4
+uint8 COMMAND_CONFIGURE_RATES=5
+uint8 COMMAND_CLEAR_ABNORMAL=6
+
+# stamp 只相对当前租约心跳基准校验 TTL，不要求机载端与地面站绝对墙钟一致。
+builtin_interfaces/Time stamp
+string source_id
+uint64 sequence
+uint32 ttl_ms
+uint8 command
+float64 value
+---
+bool accepted
+string message

@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!-- Copyright (c) 2026 北京航空航天大学 -->
+<!-- SPDX-License-Identifier: MulanPSL-2.0 -->
+<!-- 按需采集 AprilTag、估计 Odin 平面修正并与 extnav 原子交接。 -->
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>correction_service</name>
+  <version>1.0.0</version>
+  <description>按需执行 AprilTag 识别并修正 Odin 平面坐标的独立服务。</description>
+  <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
+  <license>MulanPSL-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>correction_interfaces</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
