@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 一键构建并安装四组件机载飞控 systemd 服务；绝不发送解锁或起飞命令。
 
 set -Eeuo pipefail

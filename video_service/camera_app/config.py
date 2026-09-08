@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """摄像头配置、运行路径、V4L2 能力探测与持久化。"""
 
 from __future__ import annotations

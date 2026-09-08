@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """地面站浅色工程主题与统一视觉常量。"""
 
 from __future__ import annotations

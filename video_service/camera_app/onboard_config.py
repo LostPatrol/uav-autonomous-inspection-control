@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """读取机载视频与镜头 INI 配置，不把运行参数复制进飞控配置。"""
 
 from __future__ import annotations

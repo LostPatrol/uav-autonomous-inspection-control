@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """可由地面站启动、也可单独运行的摄像头配置面板入口。"""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """从受支持的文件格式读取本地 ENU 航点，供 GUI 原子替换列表。"""
 
 from __future__ import annotations

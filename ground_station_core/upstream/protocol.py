@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """上位机协议 V2.0 的主题信封、确认、状态及面板示例。"""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 获取、续租或主动释放单一地面站控制权。
 # stamp 是地面站本地发送时间；首次成功申请只建立相对时间基准，不比较两机绝对日期。
 builtin_interfaces/Time stamp

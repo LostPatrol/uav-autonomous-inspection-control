@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 备份并部署任务 27 extnav 源码；只构建，不启动、重启或控制真实飞机。
 
 set -Eeuo pipefail

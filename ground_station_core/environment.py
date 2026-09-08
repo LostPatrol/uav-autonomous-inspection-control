@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """本地完整 SITL 编排与远端机载服务连接工作流。"""
 
 from __future__ import annotations

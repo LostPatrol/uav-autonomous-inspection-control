@@ -1,5 +1,5 @@
 // Copyright (c) 2026 北京航空航天大学
-// SPDX-License-Identifier: MulanPSL-2.0
+// SPDX-License-Identifier: Apache-2.0
 /**
  * @file waypoint_arrival_tracker.hpp
  * @brief 航点启动与入点阶段的定时重试、保持和异常阈值跟踪器。

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """上位机协议命令到现有地面站动作的集中映射与字段转换。"""
 
 from __future__ import annotations

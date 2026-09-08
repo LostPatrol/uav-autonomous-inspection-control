@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """独立管理 MediaMTX、FFmpeg、录像封装、进度和按需 JPG 截图。"""
 
 from __future__ import annotations

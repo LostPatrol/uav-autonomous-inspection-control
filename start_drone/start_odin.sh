@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Start the Odin positioning driver from its uniquely discovered ROS overlay.
 
 set -Eeuo pipefail

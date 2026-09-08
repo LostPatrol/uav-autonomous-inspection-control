@@ -1,6 +1,6 @@
 # SITL 与实机共同使用的机载控制、安全保护和 PD+DOB 参数。
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 修改此文件后，重启本地仿真即可使新参数在仿真中生效。
 # 实机需要修改/src/onboard_control/config/control.yaml后本地重新构建
 # 或者临时修改 install/onboard_control/share/onboard_control/config/control.yaml

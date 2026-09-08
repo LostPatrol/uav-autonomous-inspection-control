@@ -1,6 +1,6 @@
 # 四组件生产模板；安装器替换用户和工作区，占位符不得原样部署。
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 [Unit]
 Description=ROS 2 ArduPilot onboard control service
 # 命令时效使用地面站相对时间与单调时钟，外网 NTP 不得阻塞离线作业启动。

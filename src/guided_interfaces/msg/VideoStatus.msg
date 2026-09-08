@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 独立视频服务发布的发现地址、媒体路径和非飞行关键运行状态。
 std_msgs/Header header
 string interface_version

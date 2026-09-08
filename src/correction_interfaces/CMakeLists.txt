@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # AprilTag-Odin 修正服务、extnav 与地面调试面板共享的独立 ROS 2 接口。
 cmake_minimum_required(VERSION 3.16)
 project(correction_interfaces)

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # extnav 当前 Odin session、实际生效修正及 identity 保底状态。
 std_msgs/Header header
 string interface_version

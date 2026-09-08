@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 在 Ubuntu 24.04 / ROS 2 Jazzy 上安装并验证完整地面站。
 
 set -Eeuo pipefail

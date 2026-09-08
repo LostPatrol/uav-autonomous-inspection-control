@@ -1,5 +1,5 @@
 // Copyright (c) 2026 北京航空航天大学
-// SPDX-License-Identifier: MulanPSL-2.0
+// SPDX-License-Identifier: Apache-2.0
 /**
  * @file reference_generator.hpp
  * @brief 可插拔航点参考生成器、独立参数组与低成本工厂接口。

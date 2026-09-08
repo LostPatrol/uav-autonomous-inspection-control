@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """独立 Qt 工具窗口复用的透明留边、自绘阴影和窗口控制。"""
 
 from __future__ import annotations

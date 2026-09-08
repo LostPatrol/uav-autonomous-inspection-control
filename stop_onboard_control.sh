@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Stop the managed onboard service and any manually started flight-stack processes.
 
 set -Eeuo pipefail

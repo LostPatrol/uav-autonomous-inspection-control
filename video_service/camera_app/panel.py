@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """独立摄像头面板：三种视频源共用手填 RTSP 预览器。"""
 
 from __future__ import annotations

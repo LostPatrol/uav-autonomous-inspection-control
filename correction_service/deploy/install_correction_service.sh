@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 构建并安装独立 correction_service；启动后 idle，绝不自动打开相机或控制飞行。
 
 set -Eeuo pipefail

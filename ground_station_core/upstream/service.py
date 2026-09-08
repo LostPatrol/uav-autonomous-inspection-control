@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """可独立连接、断开与重启的上位机 WebSocket 通讯服务。"""
 
 from __future__ import annotations

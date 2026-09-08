@@ -1,5 +1,5 @@
 // Copyright (c) 2026 北京航空航天大学
-// SPDX-License-Identifier: MulanPSL-2.0
+// SPDX-License-Identifier: Apache-2.0
 /**
  * @file onboard_control_node.hpp
  * @brief 机载命令仲裁、任务执行、MAVROS 网关、租约与失联保护节点。

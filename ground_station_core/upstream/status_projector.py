@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """把地面站权威快照与命令结果投影为上位机协议状态。"""
 
 from __future__ import annotations

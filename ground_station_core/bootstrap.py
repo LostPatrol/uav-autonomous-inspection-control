@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """地面站直接启动时自动加载 ROS 2 与本工作空间 overlay。"""
 
 from __future__ import annotations

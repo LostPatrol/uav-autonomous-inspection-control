@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """保留 Odin 历史并按图像采集时间选择同一时刻的里程计，而非处理时最新值。"""
 
 from __future__ import annotations

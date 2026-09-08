@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """AprilTag、相机、Odin IMU 的完整 SE(3) 组合与最终 SE(2) 提取。"""
 
 from __future__ import annotations

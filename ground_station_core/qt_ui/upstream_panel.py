@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """上位机 WebSocket 配置、映射、原始报文与 JSON 说明面板。"""
 
 from __future__ import annotations

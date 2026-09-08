@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """外部 ROS/SITL 进程的分组启动、日志记录、分级终止与残留校验。"""
 
 from __future__ import annotations

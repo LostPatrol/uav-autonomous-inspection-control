@@ -1,5 +1,5 @@
 // Copyright (c) 2026 北京航空航天大学
-// SPDX-License-Identifier: MulanPSL-2.0
+// SPDX-License-Identifier: Apache-2.0
 /**
  * @file onboard_control_node.cpp
  * @brief 机载高层协议、控制权租约、MAVROS 编排、航点和固定周期输出实现。

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """按任务生命周期启动/停止带硬件 PTS 的下视相机节点并锁定镜头参数。"""
 
 from __future__ import annotations

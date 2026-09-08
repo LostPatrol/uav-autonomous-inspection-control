@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """Odin 到 MAVROS 的外部导航桥，并在同一节点内原子维护可选 SE(2) 修正。
 
 原始 /odin1/odometry_highfreq 始终是唯一输入。修正接口包缺失、尚未校准、

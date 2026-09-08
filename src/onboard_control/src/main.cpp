@@ -1,5 +1,5 @@
 // Copyright (c) 2026 北京航空航天大学
-// SPDX-License-Identifier: MulanPSL-2.0
+// SPDX-License-Identifier: Apache-2.0
 /**
  * @file main.cpp
  * @brief 启动多线程机载控制执行器，使服务响应不会阻塞固定周期控制。

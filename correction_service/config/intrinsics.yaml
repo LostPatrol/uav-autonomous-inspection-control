@@ -1,6 +1,6 @@
 # Wasintek 下视相机在 1920x1080 下的 OpenCV 针孔内参。
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 来源：飞机 /home/nvidia/camera_calib/camera_calibration.yaml（2026-08-27）。
 image_width: 1920
 image_height: 1080

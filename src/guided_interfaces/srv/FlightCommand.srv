@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 起降、悬停、取消和维护命令的统一请求接口。
 uint8 COMMAND_TAKEOFF=1
 uint8 COMMAND_LAND=2

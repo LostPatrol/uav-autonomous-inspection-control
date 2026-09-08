@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # Portable runtime discovery shared by the ground and onboard launchers.
 
 # Print an error and stop the current launcher without mutating the host.

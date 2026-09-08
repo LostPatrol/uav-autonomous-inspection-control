@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!-- Copyright (c) 2026 北京航空航天大学 -->
-<!-- SPDX-License-Identifier: MulanPSL-2.0 -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- 机载控制服务与地面站之间唯一共享的高层 ROS 2 协议包。 -->
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
@@ -8,7 +8,7 @@
   <version>1.0.0</version>
   <description>地面站与机载控制器共享的版本化高层通信接口。</description>
   <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
-  <license>MulanPSL-2.0</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>rosidl_default_generators</buildtool_depend>

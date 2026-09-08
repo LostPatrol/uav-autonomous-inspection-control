@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """ROS2-ArduPilot PySide6/Qt 地面站单文件入口。"""
 
 from __future__ import annotations

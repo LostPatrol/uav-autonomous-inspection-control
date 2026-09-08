@@ -1,6 +1,6 @@
 # 独立 Odin 修正服务；不要添加 Requires/PartOf=飞控，失败不得停止 extnav/MAVROS。
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 [Unit]
 Description=Independent AprilTag to Odin correction service
 Wants=network-online.target

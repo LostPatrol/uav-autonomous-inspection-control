@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """把当前会话选择的位姿转换为隔离命名的 RViz TF2 机体变换。"""
 
 import rclpy

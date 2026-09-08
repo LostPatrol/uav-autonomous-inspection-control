@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """可由地面站分离启动、也可直接运行的 AprilTag-Odin 修正面板入口。"""
 
 from __future__ import annotations

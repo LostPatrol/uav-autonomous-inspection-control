@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 地面调试面板停止当前任务；job_id 为空表示停止调用时唯一活动任务。
 builtin_interfaces/Time stamp
 string source_id

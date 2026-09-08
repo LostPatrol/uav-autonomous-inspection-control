@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 机载控制服务与地面站共享的 ROS 2 接口构建配置。
 cmake_minimum_required(VERSION 3.16)
 project(guided_interfaces)

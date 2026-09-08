@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 当前控制权持有者用于续租并刷新地面站本地时间基准的低带宽心跳。
 # header.stamp 是地面站本地发送时间，绝不与机载绝对日期直接比较。
 std_msgs/Header header

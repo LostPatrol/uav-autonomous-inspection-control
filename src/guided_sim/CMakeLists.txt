@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 仿真包只保留模型与可视化；所有持续飞行控制已迁入 onboard_control。
 cmake_minimum_required(VERSION 3.16)
 project(guided_sim)

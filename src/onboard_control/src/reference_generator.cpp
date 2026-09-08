@@ -1,5 +1,5 @@
 // Copyright (c) 2026 北京航空航天大学
-// SPDX-License-Identifier: MulanPSL-2.0
+// SPDX-License-Identifier: Apache-2.0
 /**
  * @file reference_generator.cpp
  * @brief 位置阶跃、二阶滤波、梯形速度和限 jerk S 曲线解析实现。

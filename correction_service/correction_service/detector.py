@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """使用 OpenCV AprilTag 36h11 检测器生成带重投影残差的相机<-Tag 位姿。"""
 
 from __future__ import annotations

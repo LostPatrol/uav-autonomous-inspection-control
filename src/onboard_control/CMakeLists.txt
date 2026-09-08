@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 无图形机载控制服务及其纯 C++ PD+DOB 控制库构建配置。
 cmake_minimum_required(VERSION 3.16)
 project(onboard_control)

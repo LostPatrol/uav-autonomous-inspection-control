@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """Qt 地面站复用卡片、状态徽章、数值输入和活动提示组件。"""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """严格加载相机标定、Tag 世界位姿和修正任务运行参数。"""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 视频截图命令；纯视频手动命令可由地面站直发，航点命令由机载控制节点发布。
 uint8 KIND_MANUAL=0
 uint8 KIND_GCS_WAYPOINT=1

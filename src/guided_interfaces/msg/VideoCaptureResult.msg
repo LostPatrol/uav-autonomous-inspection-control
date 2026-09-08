@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 独立视频服务对一条截图命令发布的完成事件。
 std_msgs/Header header
 string source_id

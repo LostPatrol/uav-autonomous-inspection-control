@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 一次有序且有有效期的键盘速度增量意图；连续控制状态只保存在机载端。
 # header.stamp 只相对当前租约心跳基准校验 TTL，不要求两机绝对墙钟一致。
 std_msgs/Header header

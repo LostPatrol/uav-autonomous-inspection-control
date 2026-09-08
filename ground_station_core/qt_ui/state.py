@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """把机载权威快照转换为 Qt 控件启用策略。"""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """地面站 ROS 2 薄客户端：租约、命令协议、机载状态与结果桥接。"""
 
 from __future__ import annotations

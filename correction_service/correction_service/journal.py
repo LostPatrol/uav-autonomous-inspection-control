@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """correction_service 轮转服务日志和逐任务 JSONL 审计记录。"""
 
 from __future__ import annotations

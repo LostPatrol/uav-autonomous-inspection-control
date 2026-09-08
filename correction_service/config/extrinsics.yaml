@@ -1,6 +1,6 @@
 # 相机坐标到 Odin IMU 坐标的齐次变换 T_imu_camera。
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 基矩阵来自飞机 vins_odin_calib/output/success01-run_20260827_233838；质量判定通过。
 # 2026-08-31 真机定向台架确认原矩阵相对当前安装绕相机光轴反向，因此右乘
 # Rz(180deg)。Tag 0 图案上方与机头同向时，dry-run yaw 由 179.858deg 修正到约 0deg。

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!-- Copyright (c) 2026 北京航空航天大学 -->
-<!-- SPDX-License-Identifier: MulanPSL-2.0 -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- 生产 extnav_bridge 元数据模板；缺少 correction_interfaces 时源码仍 identity 透传。 -->
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
@@ -8,7 +8,7 @@
   <version>1.0.0</version>
   <description>支持原子平面修正的 Odin 至 MAVROS 外部导航桥。</description>
   <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
-  <license>MulanPSL-2.0</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
   <depend>correction_interfaces</depend>

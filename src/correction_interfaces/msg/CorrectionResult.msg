@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 一次校准任务的可靠终态；失败不会修改 extnav 的 active correction。
 std_msgs/Header header
 string interface_version

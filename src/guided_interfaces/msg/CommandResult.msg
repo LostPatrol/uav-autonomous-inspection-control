@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 机载端对一条高层命令发布的可靠执行结果或进度。
 uint8 STATUS_RUNNING=0
 uint8 STATUS_SUCCEEDED=1

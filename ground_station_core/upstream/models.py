@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """上位机通讯线程、协议映射与 Qt 适配层共享的不可变模型。"""
 
 from __future__ import annotations

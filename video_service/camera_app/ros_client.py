@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """独立面板使用的机载视频 ROS 客户端，不接入飞行控制会话。"""
 
 from __future__ import annotations

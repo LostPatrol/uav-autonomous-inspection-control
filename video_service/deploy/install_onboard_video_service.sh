@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 一键配置独立机载视频 systemd 服务；MediaMTX 必须已安装到系统。
 
 set -Eeuo pipefail

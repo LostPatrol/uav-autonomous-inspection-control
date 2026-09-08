@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 机载端聚合发布的飞控、控制器、租约与诊断状态。
 uint8 MODE_IDLE=0
 uint8 MODE_TAKEOFF=1

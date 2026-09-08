@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 彻底停止独立机载视频服务、残留媒体进程和真实摄像头占用者。
 
 set -Eeuo pipefail

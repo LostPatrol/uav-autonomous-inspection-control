@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <!-- Copyright (c) 2026 北京航空航天大学 -->
-<!-- SPDX-License-Identifier: MulanPSL-2.0 -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- 独立于 GUI 生命周期运行的机载任务管理与 100 Hz PD+DOB 控制包。 -->
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
@@ -8,7 +8,7 @@
   <version>1.0.0</version>
   <description>机载命令仲裁、航点执行、故障保护与 C++ PD+DOB 控制。</description>
   <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
-  <license>MulanPSL-2.0</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <depend>eigen</depend>

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # correction_service 的实时任务、候选修正与质量状态。
 uint8 STATE_IDLE=0
 uint8 STATE_STARTING=1

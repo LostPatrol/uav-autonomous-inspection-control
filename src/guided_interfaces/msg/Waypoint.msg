@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 # 本地 ENU 航点、期望偏航角及可选的甲方拍照编号。
 geometry_msgs/Point position
 float64 yaw

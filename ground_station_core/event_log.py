@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """线程安全的结构化日志总线，供后端在事件产生时同步标注等级。"""
 
 from __future__ import annotations

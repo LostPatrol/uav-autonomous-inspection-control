@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """滚动稳健汇总逐帧 SE(2) 候选，并在满足全部质量门时一次性收敛。"""
 
 from __future__ import annotations

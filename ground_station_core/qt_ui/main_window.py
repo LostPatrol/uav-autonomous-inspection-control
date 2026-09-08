@@ -1,5 +1,5 @@
 # Copyright (c) 2026 北京航空航天大学
-# SPDX-License-Identifier: MulanPSL-2.0
+# SPDX-License-Identifier: Apache-2.0
 """PySide6 地面站主窗口：组合面板、桥接线程事件并执行安全交互。"""
 
 from __future__ import annotations
