@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-# 在 Ubuntu 24.04 / ROS 2 Jazzy 上安装并验证完整地面站。
+# Build and verify the complete ground station on Ubuntu 22.04/Humble or 24.04/Jazzy.
 
 set -Eeuo pipefail
 
-readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly runtime_helpers="${project_root}/start_drone/runtime_common.bash"
+readonly project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly runtime_helpers="${project_root}/scripts/lib/runtime_common.bash"
 [[ -r "${runtime_helpers}" ]] || {
   echo "[ground-setup] runtime discovery helper is missing" >&2
   exit 1
@@ -35,7 +35,7 @@ for command in ffmpeg ffprobe v4l2-ctl; do
 done
 if [[ ! -x /usr/local/bin/mediamtx ]]; then
   echo "[ground-setup] required MediaMTX is missing: /usr/local/bin/mediamtx" >&2
-  echo "[ground-setup] 请按软件详细开发与使用手册安装匹配架构的 MediaMTX" >&2
+  echo "[ground-setup] install the matching architecture from video_service/README.md" >&2
   exit 1
 fi
 if ! mediamtx_version="$(/usr/local/bin/mediamtx --version 2>/dev/null)"; then
@@ -69,5 +69,11 @@ colcon build \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 runtime_source_setup "${project_root}/install/setup.bash"
+colcon test \
+  --packages-select \
+    guided_interfaces onboard_control guided_sim correction_interfaces correction_service \
+  --event-handlers console_direct+
+colcon test-result --verbose
+
 "${project_root}/.venv/bin/python3" ground_station.py --check-environment
-echo "[ground-setup] setup passed; run: bash start_ground_all.sh"
+echo "[ground-setup] setup passed; run: bash scripts/ground/start_ground_all.sh"

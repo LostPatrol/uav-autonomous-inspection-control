@@ -224,12 +224,16 @@ QFrame#statusBadge[tone="accent"] {{ border-left: 4px solid {COLORS['accent']}; 
 QFrame#statusBadge[tone="neutral"] {{
     border-left: 4px solid {COLORS['border_strong']};
 }}
-QFrame#activityBanner[tone="debug"] {{ background: {COLORS['surface_alt']}; }}
-QFrame#activityBanner[tone="info"] {{ background: #eaf2f8; border-color: #b9cfdf; }}
-QFrame#activityBanner[tone="warn"] {{
-    background: {COLORS['warning_soft']}; border-color: #e2c675;
+QFrame#activityBanner[activityState="idle"] {{
+    background: {COLORS['surface_alt']}; border-color: {COLORS['border']};
 }}
-QFrame#activityBanner[tone="error"] {{
+QFrame#activityBanner[activityState="busy"] {{
+    background: #eaf2f8; border-color: #b9cfdf;
+}}
+QFrame#activityBanner[activityState="success"] {{
+    background: #e8f6ee; border-color: #a7d9bc;
+}}
+QFrame#activityBanner[activityState="error"] {{
     background: {COLORS['danger_soft']}; border-color: #dda69f;
 }}
 QMenuBar {{
@@ -314,7 +318,8 @@ QPushButton#removeWaypointButton {{
     max-height: 26px;
     padding: 0;
 }}
-QPushButton#addWaypointButton {{
+QPushButton#addWaypointButton,
+QPushButton#addCurrentWaypointButton {{
     min-height: 26px;
     max-height: 26px;
     min-width: 26px;
@@ -324,18 +329,23 @@ QPushButton#addWaypointButton {{
     font-size: 14pt;
     font-weight: 700;
 }}
-QPushButton#addWaypointButton:hover {{ background: #edf3f7; }}
+QPushButton#addWaypointButton:hover,
+QPushButton#addCurrentWaypointButton:hover {{ background: #edf3f7; }}
 QPushButton#previewWaypointButton,
-QPushButton#importWaypointButton {{ background: white; }}
+QPushButton#importWaypointButton,
+QPushButton#exportWaypointButton {{ background: white; }}
 QPushButton#previewWaypointButton:hover,
-QPushButton#importWaypointButton:hover {{ background: #edf3f7; }}
-QPushButton#addWaypointButton:disabled {{
+QPushButton#importWaypointButton:hover,
+QPushButton#exportWaypointButton:hover {{ background: #edf3f7; }}
+QPushButton#addWaypointButton:disabled,
+QPushButton#addCurrentWaypointButton:disabled {{
     color: {COLORS['disabled']};
     background: #edf0f2;
     border-color: #dbe0e5;
 }}
 QPushButton#previewWaypointButton:disabled,
-QPushButton#importWaypointButton:disabled {{
+QPushButton#importWaypointButton:disabled,
+QPushButton#exportWaypointButton:disabled {{
     color: {COLORS['disabled']};
     background: #edf0f2;
     border-color: #dbe0e5;

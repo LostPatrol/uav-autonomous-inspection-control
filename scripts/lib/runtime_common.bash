@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-# Portable runtime discovery shared by the ground and onboard launchers.
+# Shared runtime discovery library for the ground and onboard shell launchers.
 
 # Print an error and stop the current launcher without mutating the host.
 runtime_die() {
@@ -20,6 +20,25 @@ runtime_source_setup() {
   # shellcheck disable=SC1090
   source "${setup_file}"
   set -u
+}
+
+# Load an optional per-host EnvironmentFile and export its assignments to children.
+runtime_source_environment_file() {
+  local environment_file="$1"
+  local restore_allexport=false
+
+  [[ -e "${environment_file}" ]] || return 0
+  if [[ ! -r "${environment_file}" ]]; then
+    runtime_die "environment file is not readable: ${environment_file}"
+    return 1
+  fi
+  [[ "$-" == *a* ]] && restore_allexport=true
+  set -a
+  set +u
+  # shellcheck disable=SC1090
+  source "${environment_file}"
+  set -u
+  ${restore_allexport} || set +a
 }
 
 # Read one ROS package version from its manifest without loading the overlay.
@@ -128,6 +147,23 @@ runtime_detect_python() {
   runtime_die "no executable Python 3 found; create ${runtime_project_root}/.venv"
 }
 
+# Read the ament package index in overlay order without starting the Python ROS CLI.
+# Resolve on every call: sourcing another setup may change AMENT_PREFIX_PATH.
+runtime_package_prefix() {
+  local package_name="$1"
+  local prefix
+  local -a prefixes=()
+  IFS=: read -r -a prefixes <<<"${AMENT_PREFIX_PATH:-}"
+  for prefix in "${prefixes[@]}"; do
+    [[ -n "${prefix}" ]] || continue
+    if [[ -f "${prefix}/share/ament_index/resource_index/packages/${package_name}" ]]; then
+      printf '%s\n' "${prefix}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Locate the install prefix that owns a ROS package without sourcing unrelated overlays.
 runtime_find_package_setup() {
   local package_name="$1"
@@ -137,7 +173,7 @@ runtime_find_package_setup() {
   local -a matches=()
   local -a roots=()
 
-  if ros2 pkg prefix "${package_name}" >/dev/null 2>&1; then
+  if runtime_package_prefix "${package_name}" >/dev/null; then
     return 0
   fi
   if [[ -n "${requested_setup}" ]]; then
@@ -190,17 +226,52 @@ runtime_ensure_package() {
   local requested_setup="${2:-}"
   local setup_file
 
-  if ros2 pkg prefix "${package_name}" >/dev/null 2>&1; then
+  if runtime_package_prefix "${package_name}" >/dev/null; then
     return 0
   fi
   setup_file="$(
     runtime_find_package_setup "${package_name}" "${requested_setup}"
   )" || return 1
   [[ -n "${setup_file}" ]] && runtime_source_setup "${setup_file}"
-  ros2 pkg prefix "${package_name}" >/dev/null 2>&1 || {
+  runtime_package_prefix "${package_name}" >/dev/null || {
     runtime_die "${package_name} is still unavailable after sourcing ${setup_file}"
     return 1
   }
+}
+
+# Verify MAVROS's actual clock stream: 2.15.1 may ignore plugin YAML and default to 0 Hz.
+# Only restore a disabled MAVLINK rate; preserve positive operator-selected rates and modes.
+runtime_ensure_mavros_timesync() {
+  local mode="" rate="" attempt
+  for attempt in {1..5}; do
+    if mode="$(timeout 10 ros2 param get --no-daemon --spin-time 2 --timeout 5 --hide-type /mavros/time timesync_mode 2>/dev/null)"; then
+      break
+    fi
+    sleep 1
+  done
+  [[ "${mode}" == MAVLINK ]] || {
+    runtime_die "MAVROS time plugin unavailable or timesync_mode is not MAVLINK: ${mode}"
+    return 1
+  }
+  rate="$(timeout 10 ros2 param get --no-daemon --spin-time 2 --timeout 5 --hide-type /mavros/time timesync_rate)" || return 1
+  if [[ "${rate}" == "0.0" || "${rate}" == "0" ]]; then
+    printf '[runtime-discovery] enabling MAVROS TIMESYNC at 10 Hz (plugin YAML was not effective)\n'
+    timeout 10 ros2 param set --no-daemon --spin-time 2 --timeout 5 /mavros/time timesync_rate 10.0 || return 1
+    rate="$(timeout 10 ros2 param get --no-daemon --spin-time 2 --timeout 5 --hide-type /mavros/time timesync_rate)" || return 1
+  fi
+  [[ "${rate}" =~ ^[0-9]+([.][0-9]+)?$ ]] &&
+    awk -v rate="${rate}" 'BEGIN {exit !(rate > 0)}' || {
+      runtime_die "MAVROS timesync_rate did not become positive: ${rate}"
+      return 1
+    }
+  # A successful parameter reply alone does not prove that the FCU clock is available.
+  timeout 15 ros2 topic echo --no-daemon --qos-profile sensor_data --once \
+    --filter 'm.remote_timestamp_ns > 0' \
+    /mavros/timesync_status mavros_msgs/msg/TimesyncStatus >/dev/null || {
+      runtime_die "no valid FCU TIMESYNC received within 15 s; check MAVROS and the FCU link"
+      return 1
+    }
+  printf '[runtime-discovery] FCU TIMESYNC verified (configured rate=%s Hz)\n' "${rate}"
 }
 
 # Print a serial candidate only when the current user can open it read/write.

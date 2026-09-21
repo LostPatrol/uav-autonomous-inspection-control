@@ -60,8 +60,12 @@ from ..upstream import (
     UpstreamCommunicationService,
 )
 from ..waypoint_io import (
+    WaypointExportError,
     WaypointImportError,
+    default_waypoint_export_path,
     load_waypoint_file,
+    save_waypoint_file,
+    waypoint_export_dialog_filter,
     waypoint_file_dialog_filter,
 )
 from .log_panel import LogPanel
@@ -502,6 +506,11 @@ class GroundStationWindow(QMainWindow):
         )
         self.correction_panel_button.clicked.connect(self._open_correction_panel)
         controls_layout.addWidget(self.correction_panel_button)
+        self.reboot_fcu_button = QPushButton("重启机载飞控")
+        self.reboot_fcu_button.setProperty("role", "danger")
+        self.reboot_fcu_button.setProperty("compact", True)
+        self.reboot_fcu_button.clicked.connect(self._reboot_fcu)
+        controls_layout.addWidget(self.reboot_fcu_button)
         self.exit_button = QPushButton("退出地面站")
         self.exit_button.setObjectName("exitButton")
         self.exit_button.setProperty("role", "danger")
@@ -554,8 +563,7 @@ class GroundStationWindow(QMainWindow):
         """展示地面站职责边界和接口版本。"""
         self._show_notice(
             "关于地面站",
-            f"无人机自主巡检地面监控与机载协同控制软件 V1.0\n"
-            f"接口 {INTERFACE_VERSION}\n\n"
+            f"无人机自主巡检地面监控与机载协同控制软件 V1.0\n接口 {INTERFACE_VERSION}\n\n"
             "本界面负责高层任务、状态和日志；100 Hz 飞行控制闭环位于机载服务。",
             QMessageBox.Icon.Information,
         )
@@ -653,6 +661,10 @@ class GroundStationWindow(QMainWindow):
             self._upstream_panel.show()
         self._upstream_panel.raise_()
         self._upstream_panel.activateWindow()
+        self._events.info("upstream", "已打开独立上位机通讯面板")
+        self.activity_banner.set_message(
+            "已打开独立上位机通讯面板。", LogLevel.INFO
+        )
 
     def _dispose_upstream_panel(self) -> None:
         """随主窗口退出销毁独立面板，避免其继续维持 Qt 事件循环。"""
@@ -684,6 +696,7 @@ class GroundStationWindow(QMainWindow):
         self.waypoints.clear_requested.connect(self._confirm_clear_waypoints)
         self.waypoints.preview_requested.connect(self._preview_waypoints)
         self.waypoints.import_file_requested.connect(self._choose_waypoint_file)
+        self.waypoints.export_file_requested.connect(self._choose_waypoint_export_file)
         self.waypoints.files_dropped.connect(self._import_dropped_waypoint_files)
         self.waypoints.waypoints_changed.connect(self._on_waypoints_changed)
         self._bridge.environment_status.connect(self._on_environment_status)
@@ -780,7 +793,7 @@ class GroundStationWindow(QMainWindow):
         self._communication_busy = True
         self._communication_cancel_pending = False
         self.activity_banner.set_message(
-            "正在被动检测实机状态与日志链路…", LogLevel.INFO
+            "正在被动检测实机状态与日志链路…", LogLevel.INFO, state="busy"
         )
         self._refresh()
         started = self._environment.test_hardware_communication(
@@ -806,14 +819,14 @@ class GroundStationWindow(QMainWindow):
             return
         self._communication_cancel_pending = True
         self._events.warn("operator", "操作者请求终止实机通讯检测")
-        self.activity_banner.set_message("正在终止实机通讯检测…", LogLevel.WARN)
+        self.activity_banner.set_message("正在终止实机通讯检测…", LogLevel.WARN, state="busy")
         self._refresh()
 
     def _begin_environment_workflow(self, mode: str, message: str) -> None:
         """原子锁定互斥入口并记录待完成环境类型。"""
         self._pending_environment_mode = mode
         self._workflow_busy = True
-        self.activity_banner.set_message(message, LogLevel.INFO)
+        self.activity_banner.set_message(message, LogLevel.INFO, state="busy")
         self._refresh()
 
     def _queue_environment_status(self, level: LogLevel, message: str) -> None:
@@ -830,7 +843,9 @@ class GroundStationWindow(QMainWindow):
 
     def _on_environment_status(self, level: LogLevel, message: str) -> None:
         """在主线程显示源端已经标级的环境进度。"""
-        self.activity_banner.set_message(message, level)
+        self.activity_banner.set_message(
+            message, level, state="error" if level == LogLevel.ERROR else "busy"
+        )
 
     def _on_environment_done(self, success: bool, message: str) -> None:
         """完成环境切换并解除互斥锁。"""
@@ -864,7 +879,9 @@ class GroundStationWindow(QMainWindow):
             level = LogLevel.WARN
         else:
             level = LogLevel.ERROR
-        self.activity_banner.set_message(message, level)
+        self.activity_banner.set_message(
+            message, level, state="success" if success or was_cancelled else "error"
+        )
         self._refresh()
 
     def _stop_simulation(self) -> None:
@@ -923,7 +940,7 @@ class GroundStationWindow(QMainWindow):
             return
         self._events.warn("operator", f"操作者确认：{title}")
         self._workflow_busy = True
-        self.activity_banner.set_message(progress, LogLevel.WARN)
+        self.activity_banner.set_message(progress, LogLevel.WARN, state="busy")
 
         def worker() -> None:
             try:
@@ -1454,6 +1471,28 @@ class GroundStationWindow(QMainWindow):
             "operator", f"手动操纵坐标系切换为「{label}」：{detail}"
         )
 
+    def _reboot_fcu(self) -> None:
+        """默认取消的危险操作确认；确认期间状态变化必须重新门控。"""
+        self._refresh()
+        if not self._availability.reboot_fcu or self._pending_commands:
+            return
+        if not self._confirm_action(
+            "重启机载飞控",
+            "将热重启飞机飞控，控制链路会暂时中断。\n"
+            "请确认飞机已落地、未解锁且无人正在操作。不会恢复此前飞行任务。",
+            critical=True,
+        ):
+            return
+        self._refresh()
+        if not self._availability.reboot_fcu or self._pending_commands:
+            return
+        self._pending_commands.add("reboot_fcu")
+        self.activity_banner.set_message(
+            "正在重启机载飞控，等待恢复确认…", LogLevel.INFO, state="busy"
+        )
+        self._ros.request_reboot_fcu()
+        self._refresh()
+
     def _takeoff(self, *, refresh_after_queue: bool = True) -> int | None:
         """仿真直接请求起飞；实机仍须高风险确认。"""
         altitude = self.operations.takeoff_altitude()
@@ -1471,7 +1510,7 @@ class GroundStationWindow(QMainWindow):
             self._events.info("operator", f"仿真模式请求起飞至 {altitude:.1f} m")
         self._pending_commands.add("takeoff")
         ticket = self._ros.request_takeoff(altitude)
-        self.activity_banner.set_message("起飞请求已发送，等待机载确认…", LogLevel.WARN)
+        self.activity_banner.set_message("起飞请求已发送，等待机载确认…", LogLevel.WARN, state="busy")
         if refresh_after_queue:
             self._refresh()
         return ticket
@@ -1500,7 +1539,7 @@ class GroundStationWindow(QMainWindow):
                 self._upstream.begin_landing(ticket)
             except Exception as exc:
                 self._events.warn("upstream", f"降落状态重绑失败：{exc}")
-        self.activity_banner.set_message("降落请求已发送，等待机载确认…", LogLevel.WARN)
+        self.activity_banner.set_message("降落请求已发送，等待机载确认…", LogLevel.WARN, state="busy")
         if refresh_after_queue:
             self._refresh()
         return ticket
@@ -1524,7 +1563,7 @@ class GroundStationWindow(QMainWindow):
         self._ros.request_hover()
         self.operations.mark_manual_command()
         self._events.info("operator", "操作者请求悬停")
-        self.activity_banner.set_message("悬停请求已发送。", LogLevel.INFO)
+        self.activity_banner.set_message("悬停请求已发送。", LogLevel.INFO, state="busy")
 
     def _send_waypoints(
         self,
@@ -1630,6 +1669,9 @@ class GroundStationWindow(QMainWindow):
             generator,
             controller,
             tuple(photo_nos) if photo_nos is not None else (),
+        )
+        self.activity_banner.set_message(
+            "航点已排队，等待机载服务接收…", LogLevel.INFO, state="busy"
         )
         self._active_waypoint_ticket = ticket
         if refresh_after_queue:
@@ -1771,6 +1813,42 @@ class GroundStationWindow(QMainWindow):
         self.activity_banner.set_message(f"航点导入失败：{message}", LogLevel.WARN)
         self._show_notice("航点导入失败", message, QMessageBox.Icon.Warning)
 
+    def _choose_waypoint_export_file(self) -> None:
+        """让操作者选择 CSV 保存位置，并导出地面站当前列表快照。"""
+        waypoints = self.waypoints.waypoints
+        if not waypoints:
+            return
+        initial_path = PROJECT_ROOT / default_waypoint_export_path()
+        try:
+            initial_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._show_waypoint_export_error(f"无法创建默认导出目录：{exc}")
+            return
+        selected_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出航点到文件",
+            str(initial_path),
+            waypoint_export_dialog_filter(),
+        )
+        if not selected_path:
+            return
+        try:
+            destination = save_waypoint_file(selected_path, waypoints)
+        except WaypointExportError as exc:
+            self._show_waypoint_export_error(str(exc))
+            return
+        message = f"已将 {len(waypoints)} 个航点导出到 {destination}"
+        self._events.info("waypoint-export", message)
+        self.activity_banner.set_message(
+            f"已导出 {len(waypoints)} 个航点。", LogLevel.INFO
+        )
+
+    def _show_waypoint_export_error(self, message: str) -> None:
+        """统一记录并显示不影响当前列表的导出失败。"""
+        self._events.warn("waypoint-export", f"航点导出失败：{message}")
+        self.activity_banner.set_message(f"航点导出失败：{message}", LogLevel.WARN)
+        self._show_notice("航点导出失败", message, QMessageBox.Icon.Warning)
+
     # ---- 周期刷新与结果 ----
 
     def _refresh(self) -> None:
@@ -1784,6 +1862,7 @@ class GroundStationWindow(QMainWindow):
             self._events.warn("upstream", f"读取上位机连接状态失败：{exc}")
         self._update_status_badges(snapshot)
         self.operations.update_snapshot(snapshot, self._connection_mode)
+        self.waypoints.update_current_pose(snapshot)
         self.waypoints.update_progress(snapshot)
         self._consume_video_results()
         self._consume_results()
@@ -1823,6 +1902,9 @@ class GroundStationWindow(QMainWindow):
                 closing=self._shutting_down,
                 communication_running=self._communication_busy,
                 communication_cancel_pending=self._communication_cancel_pending,
+            )
+            self.reboot_fcu_button.setEnabled(
+                self._availability.reboot_fcu and not self._pending_commands
             )
             self.exit_button.setEnabled(not self._shutting_down)
             self.waypoints.apply_availability(self._availability)
@@ -1902,7 +1984,11 @@ class GroundStationWindow(QMainWindow):
                 self._pending_commands.discard(result.command)
             level = LogLevel.INFO if result.success else LogLevel.ERROR
             if not stale_waypoint_result:
-                self.activity_banner.set_message(result.message, level)
+                self.activity_banner.set_message(
+                    result.message, level,
+                    state=("error" if not result.success else
+                           "success" if result.final else "busy"),
+                )
             try:
                 self._upstream.observe_result(result)
             except Exception as exc:
@@ -2134,7 +2220,7 @@ class GroundStationWindow(QMainWindow):
         self._events.warn(source, message)
         self.activity_banner.set_message(
             "正在安全退出：释放租约、清理本地仿真并停止 ROS…",
-            LogLevel.WARN,
+            LogLevel.WARN, state="busy",
         )
         self._refresh()
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-# 管理机载最小检出、原生 ROS 构建与隔离冒烟验证。
+# Manage the minimal onboard checkout, native ROS build, and isolated smoke run.
 
 set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly RUNTIME_HELPERS="$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)/start_drone/runtime_common.bash"
+readonly RUNTIME_HELPERS="$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)/scripts/lib/runtime_common.bash"
 [[ -r "${RUNTIME_HELPERS}" ]] || {
   printf '[onboard-workspace] ERROR: runtime helper is missing: %s\n' \
     "${RUNTIME_HELPERS}" >&2
@@ -15,16 +15,22 @@ readonly RUNTIME_HELPERS="$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)/start_dron
 # shellcheck disable=SC1090
 source "${RUNTIME_HELPERS}"
 readonly GUIDED_SPARSE_PATH="/src/guided_interfaces/"
+# Keep ignore rules available so build outputs stay out of update's dirty-tree check.
+readonly GITIGNORE_SPARSE_PATH="/.gitignore"
 readonly CORRECTION_INTERFACES_SPARSE_PATH="/src/correction_interfaces/"
 readonly ONBOARD_SPARSE_PATH="/src/onboard_control/"
 readonly CORRECTION_SERVICE_SPARSE_PATH="/correction_service/"
+readonly CORRECTION_START_SPARSE_PATH="/scripts/onboard/start_onboard_correction.sh"
+readonly CORRECTION_STOP_SPARSE_PATH="/scripts/onboard/stop_onboard_correction.sh"
 readonly VIDEO_SPARSE_PATH="/video_service/"
-readonly VIDEO_START_SPARSE_PATH="/start_onboard_video.sh"
-readonly VIDEO_STOP_SPARSE_PATH="/stop_onboard_video.sh"
-readonly DRONE_START_SPARSE_PATH="/start_drone/"
-readonly ONBOARD_CONTROL_START_SPARSE_PATH="/start_onboard_control.sh"
-readonly ONBOARD_CONTROL_STOP_SPARSE_PATH="/stop_onboard_control.sh"
-readonly ONBOARD_BUILD_SPARSE_PATH="/build_onboard_control.sh"
+readonly VIDEO_START_SPARSE_PATH="/scripts/onboard/start_onboard_video.sh"
+readonly VIDEO_STOP_SPARSE_PATH="/scripts/onboard/stop_onboard_video.sh"
+readonly DRONE_START_SPARSE_PATH="/scripts/onboard/components/"
+readonly RUNTIME_SPARSE_PATH="/scripts/lib/"
+readonly ONBOARD_CONTROL_START_SPARSE_PATH="/scripts/onboard/start_onboard_control.sh"
+readonly ONBOARD_CONTROL_STOP_SPARSE_PATH="/scripts/onboard/stop_onboard_control.sh"
+# The client is included by /src/onboard_control/; include its operator entry too.
+readonly FCU_REBOOT_SPARSE_PATH="/scripts/onboard/reboot_fcu.sh"
 readonly SMOKE_MAVROS_PREFIX="/_task08_smoke_mavros"
 readonly SMOKE_INTERFACE_PREFIX="/_task08_smoke_onboard"
 readonly DEFAULT_SMOKE_DOMAIN_ID="231"
@@ -47,8 +53,8 @@ Commands:
   update       Fast-forward the onboard packages and launchers sparse checkout.
   deps-check   Check ROS packages and toolchain without changing the OS.
   build        Build flight packages plus independent correction interfaces/service.
-  smoke        在非零且仅限本机的 ROS 域中启动节点，不连接 MAVROS。
-  verify       依次执行依赖检查、构建和隔离冒烟验证。
+  smoke        Run the node in a localhost-only, nonzero ROS domain without MAVROS.
+  verify       Run deps-check, build, and the isolated smoke test.
 
 Environment overrides:
   ONBOARD_WORKSPACE         Repository/workspace root. Defaults to this Git checkout.
@@ -104,22 +110,28 @@ validate_workspace_layout() {
     die "independent correction service installer is missing or not executable"
   [[ -x "${WORKSPACE_ROOT}/correction_service/deploy/install_extnav_correction.sh" ]] ||
     die "extnav correction installer is missing or not executable"
+  [[ -x "${WORKSPACE_ROOT}/scripts/onboard/start_onboard_correction.sh" ]] ||
+    die "independent correction service launcher is missing or not executable"
+  [[ -x "${WORKSPACE_ROOT}/scripts/onboard/stop_onboard_correction.sh" ]] ||
+    die "independent correction service stop helper is missing or not executable"
   [[ -x "${WORKSPACE_ROOT}/video_service/deploy/install_onboard_video_service.sh" ]] ||
     die "independent video service installer is missing or not executable"
   [[ -x "${WORKSPACE_ROOT}/src/onboard_control/deploy/install_onboard_service.sh" ]] ||
     die "onboard flight service installer is missing or not executable"
-  [[ -x "${WORKSPACE_ROOT}/start_onboard_video.sh" ]] ||
+  [[ -x "${WORKSPACE_ROOT}/scripts/onboard/start_onboard_video.sh" ]] ||
     die "independent video service launcher is missing or not executable"
-  [[ -x "${WORKSPACE_ROOT}/stop_onboard_video.sh" ]] ||
+  [[ -x "${WORKSPACE_ROOT}/scripts/onboard/stop_onboard_video.sh" ]] ||
     die "independent video service stop helper is missing or not executable"
-  [[ -d "${WORKSPACE_ROOT}/start_drone" ]] ||
-    die "start_drone is missing from ${WORKSPACE_ROOT}"
-  [[ -f "${WORKSPACE_ROOT}/start_onboard_control.sh" ]] ||
-    die "start_onboard_control.sh is missing from ${WORKSPACE_ROOT}"
-  [[ -x "${WORKSPACE_ROOT}/stop_onboard_control.sh" ]] ||
-    die "stop_onboard_control.sh is missing or not executable in ${WORKSPACE_ROOT}"
-  [[ -x "${WORKSPACE_ROOT}/build_onboard_control.sh" ]] ||
-    die "build_onboard_control.sh is missing or not executable in ${WORKSPACE_ROOT}"
+  [[ -d "${WORKSPACE_ROOT}/scripts/onboard/components" ]] ||
+    die "scripts/onboard/components is missing from ${WORKSPACE_ROOT}"
+  [[ -r "${WORKSPACE_ROOT}/scripts/lib/runtime_common.bash" ]] ||
+    die "scripts/lib/runtime_common.bash is missing from ${WORKSPACE_ROOT}"
+  [[ -f "${WORKSPACE_ROOT}/scripts/onboard/start_onboard_control.sh" ]] ||
+    die "scripts/onboard/start_onboard_control.sh is missing from ${WORKSPACE_ROOT}"
+  [[ -x "${WORKSPACE_ROOT}/scripts/onboard/stop_onboard_control.sh" ]] ||
+    die "scripts/onboard/stop_onboard_control.sh is missing or not executable in ${WORKSPACE_ROOT}"
+  [[ -x "${WORKSPACE_ROOT}/src/onboard_control/deploy/build_onboard_control.sh" ]] ||
+    die "src/onboard_control/deploy/build_onboard_control.sh is missing or not executable in ${WORKSPACE_ROOT}"
 }
 
 show_config() {
@@ -137,19 +149,22 @@ update_checkout() {
   git -C "${WORKSPACE_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
     die "workspace is not a Git checkout: ${WORKSPACE_ROOT}"
   [[ "$(git -C "${WORKSPACE_ROOT}" config --bool core.sparseCheckout || true)" == "true" ]] ||
-    die "refusing update: checkout is not sparse; follow 软件详细开发与使用手册.md"
+    die "refusing update: checkout is not sparse; follow ONBOARD_DEPLOYMENT.md"
   [[ -z "$(git -C "${WORKSPACE_ROOT}" status --porcelain)" ]] ||
     die "refusing update: Git worktree has local changes"
 
   # The checkout was initialized in non-cone mode; older Git treats --no-cone here as a path.
   git -C "${WORKSPACE_ROOT}" sparse-checkout set \
+    "${GITIGNORE_SPARSE_PATH}" \
     "${GUIDED_SPARSE_PATH}" "${CORRECTION_INTERFACES_SPARSE_PATH}" \
     "${ONBOARD_SPARSE_PATH}" "${CORRECTION_SERVICE_SPARSE_PATH}" \
+    "${CORRECTION_START_SPARSE_PATH}" "${CORRECTION_STOP_SPARSE_PATH}" \
     "${VIDEO_SPARSE_PATH}" \
     "${VIDEO_START_SPARSE_PATH}" "${VIDEO_STOP_SPARSE_PATH}" \
-    "${DRONE_START_SPARSE_PATH}" "${ONBOARD_CONTROL_START_SPARSE_PATH}" \
+    "${DRONE_START_SPARSE_PATH}" "${RUNTIME_SPARSE_PATH}" \
+    "${ONBOARD_CONTROL_START_SPARSE_PATH}" \
     "${ONBOARD_CONTROL_STOP_SPARSE_PATH}" \
-    "${ONBOARD_BUILD_SPARSE_PATH}"
+    "${FCU_REBOOT_SPARSE_PATH}"
   git -C "${WORKSPACE_ROOT}" pull --ff-only origin "${ONBOARD_GIT_BRANCH:-main}"
   validate_workspace_layout
 }
@@ -158,6 +173,7 @@ check_dependencies() {
   local package
   local -a ros_packages=(
     ament_cmake
+    ament_cmake_gtest
     ament_index_python
     builtin_interfaces
     eigen3_cmake_module
@@ -166,6 +182,7 @@ check_dependencies() {
     launch
     launch_ros
     mavros_msgs
+    libmavconn
     nav_msgs
     rclcpp
     rosidl_default_generators
@@ -202,7 +219,10 @@ build_workspace() {
     colcon build \
       --packages-select \
         guided_interfaces correction_interfaces onboard_control correction_service \
-      --cmake-args -DCMAKE_BUILD_TYPE=Release
+      --cmake-args \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DAMENT_CMAKE_SYMLINK_INSTALL=OFF
   )
 }
 
@@ -288,8 +308,8 @@ smoke_test() {
     die "isolated status topic was not received"
   }
 
-  grep -Eq "^interface_version: ['\"]?3\\.2['\"]?$" "${status_log}" ||
-    die "smoke status did not report interface version 3.2"
+  grep -Eq "^interface_version: ['\"]?3\\.3['\"]?$" "${status_log}" ||
+    die "smoke status did not report interface version 3.3"
   grep -q '^fcu_connected: false$' "${status_log}" ||
     die "smoke node unexpectedly reported an FCU connection"
   grep -q '^armed: false$' "${status_log}" ||
@@ -305,7 +325,7 @@ smoke_test() {
   [[ ${echo_status} -eq 124 ]] ||
     die "smoke node emitted an attitude setpoint or the no-output check failed (${echo_status})"
 
-  log "smoke passed: interface=3.2, fcu_connected=false, armed=false, setpoint_messages=0"
+  log "smoke passed: interface=3.3, fcu_connected=false, armed=false, setpoint_messages=0"
   cleanup_smoke
   trap - EXIT INT TERM
 }

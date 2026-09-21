@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-# Stop the managed onboard service and any manually started flight-stack processes.
+# Operator entry to stop the onboard service and manually started flight-stack processes.
 
 set -Eeuo pipefail
 

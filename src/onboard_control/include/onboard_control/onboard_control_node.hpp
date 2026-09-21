@@ -35,10 +35,15 @@
 #include <guided_interfaces/srv/set_gps_origin.hpp>
 #include <mavros_msgs/msg/attitude_target.hpp>
 #include <mavros_msgs/msg/extended_state.hpp>
+#include <mavros_msgs/msg/param_event.hpp>
+#include <mavros_msgs/msg/mavlink.hpp>
 #include <mavros_msgs/msg/state.hpp>
+#include <mavros_msgs/msg/timesync_status.hpp>
+#include <mavros_msgs/srv/command_long.hpp>
 #include <mavros_msgs/srv/command_bool.hpp>
 #include <mavros_msgs/srv/command_tol.hpp>
 #include <mavros_msgs/srv/message_interval.hpp>
+#include <mavros_msgs/srv/param_pull.hpp>
 #include <mavros_msgs/srv/set_mode.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp/parameter_client.hpp>
@@ -165,11 +170,24 @@ private:
   void send_land_mode_request(const CommandIdentity & command, bool failsafe);
   bool active_task_matches(const CommandIdentity & command) const;
 
+  // Ground-only reboot transaction; observation also handles an external FCU reboot.
+  void initialize_reboot();
+  void start_fcu_reboot(const CommandIdentity &, std::shared_ptr<FlightCommand::Response>);
+  void send_fcu_reboot();
+  void query_reboot_origin();
+  void observe_fcu_clock(const mavros_msgs::msg::TimesyncStatus &);
+  void reboot_tick(SteadyTime now);
+  void finish_reboot(bool success, const std::string & message);
+  bool fresh_on_ground(SteadyTime now) const;
+
   // Maintenance services are serialized independently of flight tasks.
   void start_message_rate_configuration(
     const CommandIdentity & command, bool publish_command_result = true);
   void send_next_message_rate();
   void check_thrust_mode_parameter();
+  void apply_thrust_mode_parameters(const std::vector<rclcpp::Parameter> & parameters);
+  void request_priority_parameters(SteadyTime now);
+  void on_fcu_parameter(const mavros_msgs::msg::ParamEvent & message);
   void check_origin_confirmation_timeout(const SteadyTime & now);
 
   // Onboard task, safety and output helpers.
@@ -219,8 +237,8 @@ private:
   double status_frequency_hz_{10.0};
   double pose_timeout_seconds_{0.3};
   double state_timeout_seconds_{2.0};
-  // Hardware keeps 40 s; local SITL may safely override this startup-only delay.
-  double fcu_parameter_check_initial_delay_seconds_{40.0};
+  // Cache fallback delay; live parameter events may verify sooner.
+  double fcu_parameter_check_initial_delay_seconds_{2.0};
   double link_loss_land_timeout_seconds_{10.0};
   double takeoff_timeout_seconds_{45.0};
   double land_confirmation_timeout_seconds_{120.0};
@@ -250,6 +268,23 @@ private:
   bool fcu_connected_{false};
   bool armed_{false};
   bool extended_state_observed_{false};
+  bool on_ground_{false};
+  SteadyTime last_extended_state_time_{};
+  bool reboot_active_{false};
+  bool reboot_observed_{false};
+  bool reboot_requested_{false};
+  bool reboot_sent_{false}, reboot_origin_prepared_{false};
+  SteadyTime last_reboot_origin_query_{};
+  bool reboot_origin_saved_{false};
+  bool reboot_guid_seen_{false}, reboot_hover_seen_{false};
+  geographic_msgs::msg::GeoPoint reboot_origin_;
+  CommandIdentity reboot_command_;
+  SteadyTime reboot_started_{}, reboot_detected_{}, reboot_ready_since_{};
+  SteadyTime last_boot_clock_time_{}, last_reboot_origin_send_{};
+  std::uint64_t boot_clock_ns_{0}, reboot_generation_{0};
+  std::uint64_t session_generation_{0};
+  rclcpp::Subscription<mavros_msgs::msg::TimesyncStatus>::SharedPtr boot_clock_subscription_;
+  rclcpp::Client<mavros_msgs::srv::CommandLong>::SharedPtr reboot_client_;
   bool airborne_{false};
   std::string autopilot_mode_;
   bool pose_valid_{false};
@@ -322,6 +357,19 @@ private:
   SteadyTime last_automatic_message_rate_attempt_{};
   bool thrust_mode_verified_{false};
   bool thrust_mode_check_inflight_{false};
+  bool priority_parameter_reads_{true};
+  std::string parameter_request_topic_{"/uas1/mavlink_sink"};
+  int parameter_target_system_{1};
+  int parameter_target_component_{1};
+  unsigned int priority_parameter_rounds_{0};
+  std::uint8_t priority_parameter_sequence_{0};
+  SteadyTime last_priority_parameter_request_{};
+  rclcpp::Publisher<mavros_msgs::msg::Mavlink>::SharedPtr parameter_request_publisher_;
+  bool fcu_parameter_pull_requested_{false};  // 每次飞控连接只主动拉取一次，不强制清空缓存。
+  // 只收本连接的新参数事件；版本号防止较早发起的缓存读覆盖新事件。
+  std::optional<rclcpp::Parameter> fcu_guid_options_;
+  std::optional<rclcpp::Parameter> fcu_hover_throttle_;
+  std::uint64_t fcu_parameter_revision_{0};
   SteadyTime last_thrust_mode_check_{};
   SteadyTime fcu_parameter_sync_started_{};
 
@@ -371,6 +419,8 @@ private:
   rclcpp::Client<mavros_msgs::srv::CommandTOL>::SharedPtr takeoff_client_;
   rclcpp::Client<mavros_msgs::srv::MessageInterval>::SharedPtr message_interval_client_;
   rclcpp::AsyncParametersClient::SharedPtr fcu_parameter_client_;
+  rclcpp::Subscription<mavros_msgs::msg::ParamEvent>::SharedPtr fcu_parameter_subscription_;
+  rclcpp::Client<mavros_msgs::srv::ParamPull>::SharedPtr fcu_parameter_pull_client_;
 
   rclcpp::TimerBase::SharedPtr control_timer_;
   rclcpp::TimerBase::SharedPtr status_timer_;

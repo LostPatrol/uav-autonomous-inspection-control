@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-# 备份并部署任务 27 extnav 源码；只构建，不启动、重启或控制真实飞机。
+# 备份并部署 correction 2.0 extnav 源码；只构建，不启动、重启或控制真实飞机。
 
 set -Eeuo pipefail
 
@@ -13,6 +13,7 @@ readonly EXTNAV_SOURCE="${EXTNAV_PACKAGE_ROOT}/extnav_bridge/extnav_to_vision_po
 readonly PATCH_SOURCE="${WORKSPACE_ROOT}/correction_service/extnav_patch/extnav_to_vision_pose.py"
 readonly PATCH_PACKAGE="${WORKSPACE_ROOT}/correction_service/extnav_patch/package.xml"
 readonly FLIGHT_SERVICE="ros2-ardupilot-onboard.service"
+readonly CORRECTION_PACKAGE_VERSION="2.0.0"
 
 die() {
   printf '[extnav-correction-install] ERROR: %s\n' "$*" >&2
@@ -26,6 +27,14 @@ source_setup() {
   # shellcheck disable=SC1090
   source "${setup_file}"
   set -u
+}
+
+verify_manifest_version() {
+  # 部署前后锁定 correction 2.0，避免 extnav 加载旧消息定义。
+  local manifest="$1"
+  [[ -r "${manifest}" ]] || die "package manifest is missing: ${manifest}"
+  grep -Eq "<version>[[:space:]]*${CORRECTION_PACKAGE_VERSION//./\\.}[[:space:]]*</version>" \
+    "${manifest}" || die "package manifest is not ${CORRECTION_PACKAGE_VERSION}: ${manifest}"
 }
 
 usage() {
@@ -53,6 +62,11 @@ fi
   die "correction_interfaces source is missing"
 [[ -f "${PATCH_SOURCE}" && -f "${PATCH_PACKAGE}" ]] ||
   die "controlled extnav patch is incomplete"
+verify_manifest_version "${WORKSPACE_ROOT}/src/correction_interfaces/package.xml"
+verify_manifest_version "${PATCH_PACKAGE}"
+grep -q 'final_sample_revision' \
+  "${WORKSPACE_ROOT}/src/correction_interfaces/msg/ExtnavCorrectionStatus.msg" ||
+  die "source ExtnavCorrectionStatus is not interface 2.0"
 [[ -f "${EXTNAV_SOURCE}" && -f "${EXTNAV_PACKAGE_ROOT}/package.xml" ]] ||
   die "production extnav source is missing under ${EXTNAV_PACKAGE_ROOT}"
 
@@ -66,12 +80,20 @@ fi
 source_setup /opt/ros/jazzy/setup.bash
 (
   cd -- "${WORKSPACE_ROOT}"
-  colcon build --packages-select correction_interfaces --symlink-install
+  colcon build \
+    --packages-select correction_interfaces \
+    --cmake-args -DAMENT_CMAKE_SYMLINK_INSTALL=OFF
 )
 source_setup "${WORKSPACE_ROOT}/install/setup.bash"
+interfaces_prefix="$(ros2 pkg prefix correction_interfaces)"
+verify_manifest_version "${interfaces_prefix}/share/correction_interfaces/package.xml"
+installed_extnav_status="$(ros2 interface show correction_interfaces/msg/ExtnavCorrectionStatus)"
+grep -q 'final_sample_revision' <<< "${installed_extnav_status}" ||
+  die "installed ExtnavCorrectionStatus is not interface 2.0"
+ros2 interface show correction_interfaces/srv/SetCorrection >/dev/null
 
 readonly BACKUP_ROOT="${EXTNAV_BACKUP_ROOT:-/home/nvidia/backups}"
-readonly BACKUP_DIR="${BACKUP_ROOT}/extnav-task27-$(date '+%Y%m%d-%H%M%S')"
+readonly BACKUP_DIR="${BACKUP_ROOT}/extnav-task29-$(date '+%Y%m%d-%H%M%S')"
 mkdir -p -- "${BACKUP_DIR}/extnav_bridge/extnav"
 cp -a -- "${EXTNAV_SOURCE}" "${BACKUP_DIR}/extnav_bridge/extnav/"
 cp -a -- "${EXTNAV_PACKAGE_ROOT}/package.xml" "${BACKUP_DIR}/extnav_bridge/"

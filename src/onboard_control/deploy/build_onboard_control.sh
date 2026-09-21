@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-# 在地面开发机或机载计算机上重建共享接口与机载控制器。
+# Rebuild the shared interfaces and onboard controller on either workstation or aircraft.
 
 set -Eeuo pipefail
 
-readonly project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
 readonly workspace_helper="${project_root}/src/onboard_control/deploy/onboard_workspace.sh"
 
 usage() {
   cat <<'EOF'
-Usage: ./build_onboard_control.sh [--verify]
+Usage: ./src/onboard_control/deploy/build_onboard_control.sh [--verify]
 
-不带参数时，以 Release 模式重建飞行控制包、独立修正接口与修正服务。
+Without arguments, rebuild flight packages plus the independent correction
+interfaces/service in Release mode.
 
 Options:
-  --verify  检查依赖、重新构建并执行隔离冒烟验证。
-  -h, --help  显示帮助。
+  --verify  Check dependencies, rebuild, and run the isolated smoke test.
+  -h, --help  Show this help text.
 
-脚本自动识别地面端 Jazzy 或兼容目标上的 ROS 发行版。它不会启动、停止或重启
-机载服务，也不会发送任何飞行命令。
+The script auto-detects Jazzy on the ground workstation and Humble on the aircraft.
+It does not start, stop, or restart the onboard service and sends no flight command.
 EOF
 }
 

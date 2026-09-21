@@ -1,6 +1,6 @@
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-"""按任务生命周期启动/停止带硬件 PTS 的下视相机节点并锁定镜头参数。"""
+"""按任务生命周期启停本服务自有的 UVC 下视相机节点并锁定镜头参数。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ from .config import CameraSettings
 
 _CONTROL_VALUE = re.compile(r":\s*(-?\d+)(?:\s|$)")
 
+# 自动曝光模式切换和写曝光值后需要短暂稳定，时序与 video_service 实机路径一致。
+_LENS_CONTROL_SETTLE_SECONDS = 0.2
+
 
 def parse_v4l2_control_value(output: str) -> int:
     """解析 `name: value`，允许 v4l2-ctl 在数值后附带枚举说明。"""
@@ -32,7 +35,7 @@ class CameraProcessError(RuntimeError):
 
 
 class CameraProcess:
-    """只管理本对象创建的 camera_node 进程组，不触碰视频或飞控服务。"""
+    """只管理本对象创建的 UVC 节点进程组，不触碰视频或飞控服务。"""
 
     def __init__(
         self,
@@ -54,7 +57,7 @@ class CameraProcess:
         return self._process.pid if self._process is not None else None
 
     def start(self) -> None:
-        """确认设备空闲后以独立进程组启动经过标定验收的相机 ROS 节点。"""
+        """确认设备空闲后以独立进程组启动本服务维护的 UVC ROS 节点。"""
         if self._process is not None and self._process.poll() is None:
             raise CameraProcessError("下视相机进程已启动")
         device = Path(self._settings.device)
@@ -90,6 +93,8 @@ class CameraProcess:
             "-p",
             f"framerate:={self._settings.fps}",
             "-p",
+            f"publish_fps:={self._settings.publish_fps}",
+            "-p",
             f"frame_id:={self._settings.frame_id}",
             "-p",
             f"image_topic:={self._settings.image_topic}",
@@ -123,8 +128,8 @@ class CameraProcess:
                 f"下视相机节点异常退出 code={return_code}，详见 {self._log_path}"
             )
 
-    def apply_lens_controls(self) -> None:
-        """开流后逐项写入并读回标定镜头参数，任一不一致即失败。"""
+    def apply_lens_controls(self) -> dict[str, int]:
+        """开流后分步写入并最终读回全部镜头参数，任一不一致即失败。"""
         executable = shutil.which("v4l2-ctl")
         if executable is None:
             raise CameraProcessError("找不到 v4l2-ctl，无法锁定标定镜头参数")
@@ -147,6 +152,15 @@ class CameraProcess:
                     raise CameraProcessError(
                         f"镜头参数 {name} 写入失败：{changed.stderr.strip()}"
                     )
+                if name in {"auto_exposure", "exposure_time_absolute"}:
+                    time.sleep(_LENS_CONTROL_SETTLE_SECONDS)
+            except subprocess.TimeoutExpired as exc:
+                raise CameraProcessError(f"镜头参数 {name} 操作超时") from exc
+
+        # 全部写入后再逐项读回，避免只验证尚未被后续控制项影响的瞬时值。
+        actual_controls: dict[str, int] = {}
+        for name, expected in self._lens_controls.items():
+            try:
                 readback = subprocess.run(
                     [executable, "-d", self._settings.device, "--get-ctrl", name],
                     capture_output=True,
@@ -170,10 +184,12 @@ class CameraProcess:
                 raise CameraProcessError(
                     f"镜头参数 {name} 读回 {actual}，期望 {expected}"
                 )
-        self._logger.info("下视相机镜头参数已全部写入并读回确认")
+            actual_controls[name] = actual
+        self._logger.info("下视相机镜头参数已全部写入并读回确认：%s", actual_controls)
+        return actual_controls
 
     def stop(self) -> None:
-        """先 SIGINT 让 ROS/GStreamer 释放设备，再有限升级信号并确认退出。"""
+        """先 SIGINT 让 ROS/V4L2 释放设备，再有限升级信号并确认退出。"""
         process = self._process
         self._process = None
         if process is not None and process.poll() is None:
@@ -197,6 +213,6 @@ class CameraProcess:
             self._log_stream.flush()
             self._log_stream.close()
             self._log_stream = None
-        # 设备节点有时会在 GStreamer 退出后几十毫秒才解除 fuser 映射。
+        # 设备节点有时会在采集节点退出后几十毫秒才解除 fuser 映射。
         time.sleep(0.05)
         self._logger.info("下视相机节点已停止并释放设备")

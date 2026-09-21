@@ -16,6 +16,7 @@ find_package(geographic_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(guided_interfaces REQUIRED)
 find_package(mavros_msgs REQUIRED)
+find_package(libmavconn REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -35,6 +36,7 @@ target_link_libraries(dob_controller Eigen3::Eigen)
 add_executable(onboard_control_node
   src/main.cpp
   src/onboard_control_node.cpp
+  src/fcu_reboot.cpp
 )
 target_include_directories(onboard_control_node PRIVATE include ${EIGEN3_INCLUDE_DIRS})
 ament_target_dependencies(onboard_control_node
@@ -42,6 +44,7 @@ ament_target_dependencies(onboard_control_node
   geometry_msgs
   guided_interfaces
   mavros_msgs
+  libmavconn
   rclcpp
   sensor_msgs
   tf2
@@ -57,6 +60,24 @@ install(TARGETS dob_controller onboard_control_node
 )
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch deploy DESTINATION share/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_dob_controller test/test_dob_controller.cpp)
+  if(TARGET test_dob_controller)
+    target_include_directories(test_dob_controller PRIVATE include ${EIGEN3_INCLUDE_DIRS})
+    target_link_libraries(test_dob_controller dob_controller Eigen3::Eigen)
+  endif()
+  ament_add_gtest(test_reference_generator test/test_reference_generator.cpp)
+  if(TARGET test_reference_generator)
+    target_include_directories(test_reference_generator PRIVATE include ${EIGEN3_INCLUDE_DIRS})
+    target_link_libraries(test_reference_generator dob_controller Eigen3::Eigen)
+  endif()
+  ament_add_gtest(test_waypoint_arrival_tracker test/test_waypoint_arrival_tracker.cpp)
+  if(TARGET test_waypoint_arrival_tracker)
+    target_include_directories(test_waypoint_arrival_tracker PRIVATE include)
+  endif()
+endif()
 
 ament_export_include_directories(include)
 ament_export_targets(export_onboard_control HAS_LIBRARY_TARGET)

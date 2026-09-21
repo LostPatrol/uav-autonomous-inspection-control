@@ -95,6 +95,7 @@ class WaypointPanel(QWidget):
     clear_requested = Signal()
     preview_requested = Signal()
     import_file_requested = Signal()
+    export_file_requested = Signal()
     files_dropped = Signal(object)
     waypoints_changed = Signal(str)
 
@@ -105,6 +106,7 @@ class WaypointPanel(QWidget):
         self.setMinimumHeight(500)
         self._waypoints: list[tuple[float, float, float, float]] = []
         self._editing_enabled = True
+        self._current_pose: tuple[float, float, float, float] | None = None
         self._preview_enabled = False
         self._progress_tracking = False
         root = QVBoxLayout(self)
@@ -172,6 +174,15 @@ class WaypointPanel(QWidget):
         self.add_button.setProperty("baseToolTip", self.add_button.toolTip())
         self.add_button.clicked.connect(self._add_waypoint)
         coords.addWidget(self.add_button, 0)
+        self.add_current_button = self._icon_button(
+            QIcon(str(Path(__file__).resolve().parent / "assets" / "current-location.svg")),
+            "添加飞机当前实际位姿到航点列表末尾",
+            "addCurrentWaypointButton",
+        )
+        self.add_current_button.setProperty("compact", True)
+        self.add_current_button.setFixedSize(self._ROW_HEIGHT, self._ROW_HEIGHT)
+        self.add_current_button.clicked.connect(self._add_current_waypoint)
+        coords.addWidget(self.add_current_button, 0)
         # stretch=0：坐标与添加操作固定为单行，把纵向空间留给表格。
         card.content_layout.addLayout(coords, 0)
 
@@ -208,6 +219,8 @@ class WaypointPanel(QWidget):
         card.content_layout.addWidget(self.table, 1)
 
         controls = QHBoxLayout()
+        # 七个紧凑操作在面板最小宽度下也需完整显示文字；多余宽度仍由中间 stretch 吸收。
+        controls.setSpacing(2)
         assets = Path(__file__).resolve().parent / "assets"
         self.up_button = self._icon_button(
             QIcon(str(assets / "chevron-up.svg")),
@@ -264,6 +277,17 @@ class WaypointPanel(QWidget):
         self.import_button.setAccessibleName("从文件导入航点")
         self.import_button.clicked.connect(self.import_file_requested)
         controls.addWidget(self.import_button)
+        self.export_button = self._button(
+            "导出到文件", "neutral", "exportWaypointButton"
+        )
+        self.export_button.setProperty("compact", True)
+        self.export_button.setToolTip(
+            "将地面站当前列表按 index,x,y,z,yaw 格式导出为 CSV 文件"
+        )
+        self.export_button.setProperty("baseToolTip", self.export_button.toolTip())
+        self.export_button.setAccessibleName("导出当前航点列表到文件")
+        self.export_button.clicked.connect(self.export_file_requested)
+        controls.addWidget(self.export_button)
         # stretch=0：排序/清空条贴在表格下方、随卡片但不抢高度。
         card.content_layout.addLayout(controls, 0)
 
@@ -455,6 +479,27 @@ class WaypointPanel(QWidget):
             self.z_input.value(),
             math.radians(self.yaw_input.value()),
         )
+        self._append_waypoint(waypoint)
+
+    def update_current_pose(self, snapshot: VehicleSnapshot) -> None:
+        """缓存与主 GUI 实际位姿同一帧的原始 ENU 坐标和弧度偏航。"""
+        pose = (snapshot.x, snapshot.y, snapshot.z, snapshot.yaw)
+        self._current_pose = (
+            pose if snapshot.onboard_available and snapshot.connected
+            and snapshot.local_position_valid and all(math.isfinite(v) for v in pose)
+            else None
+        )
+        self.add_current_button.setEnabled(
+            self._editing_enabled and self._current_pose is not None
+        )
+
+    def _add_current_waypoint(self) -> None:
+        """只追加已显示的实际位姿，不经过输入框取整或限幅。"""
+        if self._editing_enabled and self._current_pose is not None:
+            self._append_waypoint(self._current_pose)
+
+    def _append_waypoint(self, waypoint: tuple[float, float, float, float]) -> None:
+        """统一追加、选中末行并通知日志与预览刷新。"""
         self._waypoints.append(waypoint)
         self._refresh_table(len(self._waypoints) - 1)
         self.status_label.setText(f"本地列表包含 {len(self._waypoints)} 个航点，尚未上传。")
@@ -532,9 +577,12 @@ class WaypointPanel(QWidget):
         self._update_local_controls()
 
     def _update_local_controls(self) -> None:
-        """按选择行和编辑锁更新删除、排序及清空按钮。"""
+        """按选择行、编辑锁和列表内容更新本地操作按钮。"""
         row = self.table.currentRow()
         valid = 0 <= row < len(self._waypoints)
+        self.add_current_button.setEnabled(
+            self._editing_enabled and self._current_pose is not None
+        )
         self.remove_button.setEnabled(self._editing_enabled and valid)
         self.up_button.setEnabled(self._editing_enabled and valid and row > 0)
         self.down_button.setEnabled(
@@ -545,12 +593,18 @@ class WaypointPanel(QWidget):
             self._preview_enabled and bool(self._waypoints)
         )
         self.import_button.setEnabled(self._editing_enabled)
+        self.export_button.setEnabled(bool(self._waypoints))
         if not self._waypoints:
             self.preview_button.setToolTip("请先添加或导入至少一个航点")
-        elif self._preview_enabled or self._editing_enabled:
-            self.preview_button.setToolTip(
-                str(self.preview_button.property("baseToolTip") or "")
+            self.export_button.setToolTip("请先添加或导入至少一个航点")
+        else:
+            self.export_button.setToolTip(
+                str(self.export_button.property("baseToolTip") or "")
             )
+            if self._preview_enabled or self._editing_enabled:
+                self.preview_button.setToolTip(
+                    str(self.preview_button.property("baseToolTip") or "")
+                )
 
     def apply_availability(self, state: UiAvailability) -> None:
         """仅在已启动仿真/实机会话时可编辑；上传仍受完整飞行门控。"""

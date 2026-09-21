@@ -5,9 +5,9 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>extnav_bridge</name>
-  <version>1.0.0</version>
-  <description>支持原子平面修正的 Odin 至 MAVROS 外部导航桥。</description>
-  <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
+  <version>2.0.0</version>
+  <description>Odin-to-MAVROS bridge with correction 2.0 FCU-center semantics.</description>
+  <maintainer email="2817038081@qq.com">xld</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
@@ -16,6 +16,11 @@
   <depend>nav_msgs</depend>
   <depend>python3-numpy</depend>
   <depend>rclpy</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

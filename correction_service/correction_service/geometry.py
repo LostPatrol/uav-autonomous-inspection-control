@@ -1,6 +1,6 @@
 # Copyright (c) 2026 北京航空航天大学
 # SPDX-License-Identifier: Apache-2.0
-"""AprilTag、相机、Odin IMU 的完整 SE(3) 组合与最终 SE(2) 提取。"""
+"""官方 AprilTag 图案、相机、Odin IMU 的完整 SE(3) 组合与最终 SE(2) 提取。"""
 
 from __future__ import annotations
 
@@ -22,6 +22,18 @@ class PlanarCorrection:
     tilt_rad: float
     world_imu: np.ndarray
     world_from_odin: np.ndarray
+    odin_from_tag: np.ndarray
+    odin_tag_x_m: float
+    odin_tag_y_m: float
+
+
+@dataclass(frozen=True)
+class FcuReferencePose:
+    """同一原始样本按有效/无效分支换算出的飞控参考中心位姿。"""
+
+    position: np.ndarray
+    rotation: np.ndarray
+    horizontal_reference_mode: str
 
 
 def wrap_angle(angle: float) -> float:
@@ -109,14 +121,18 @@ def transform_from_pose(
 
 
 def world_tag_transform(tag: TagPose) -> np.ndarray:
-    """Tag 配置坐标系：+X 指向图案上方，+Y 指向图案左方，+Z 朝上。"""
+    """Tag 配置系：+X 指向 AprilRobotics 官方图案上方，+Y 左方，+Z 朝上。"""
     return homogeneous(rotation_z(tag.yaw_rad), np.array((tag.x, tag.y, tag.z)))
 
 
 def configured_tag_from_standard() -> np.ndarray:
-    """把 OpenCV 的 +X右/+Y上 Tag 坐标转换为配置的 +X上/+Y左。"""
-    # p_standard = R_standard_configured * p_configured
-    rotation = np.array(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    """返回 T_OpenCVTag_ConfiguredTag，供右乘 PnP 的 camera<-OpenCVTag。"""
+    # OpenCV 36h11 字典相对 AprilRobotics 官方 PNG 旋转180°；官方纸张
+    # TL/TR/BR/BL 对应 detectMarkers 点2/3/0/1。因此配置 +X(官方上)
+    # 对应 OpenCV -Y，配置 +Y(官方左)对应 OpenCV +X，+Z 不变。
+    # 这是 Tag 坐标约定，不能通过旋转相机外参来补偿，否则航向看似正确
+    # 而相机世界位置反号。p_standard = R_standard_configured * p_configured。
+    rotation = np.array(((0.0, 1.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
     return homogeneous(rotation, np.zeros(3))
 
 
@@ -126,7 +142,7 @@ def compute_planar_correction(
     imu_from_camera: np.ndarray,
     odin_from_imu: np.ndarray,
 ) -> PlanarCorrection:
-    """按任务规定先完成 SE(3) 链，再仅提取世界<-Odin 的 x/y/yaw。"""
+    """按 Task27 完成 SE(3) 链，再直接提取世界<-Odin 的 x/y/yaw。"""
     camera_from_tag_standard = np.asarray(
         camera_from_tag_standard, dtype=np.float64
     ).reshape(4, 4)
@@ -141,6 +157,7 @@ def compute_planar_correction(
     camera_from_tag_configured = (
         camera_from_tag_standard @ configured_tag_from_standard()
     )
+    odin_from_tag = odin_from_imu @ imu_from_camera @ camera_from_tag_configured
     world_from_camera = world_tag_transform(tag) @ np.linalg.inv(
         camera_from_tag_configured
     )
@@ -158,9 +175,66 @@ def compute_planar_correction(
         tilt_rad=tilt,
         world_imu=world_from_imu,
         world_from_odin=world_from_odin,
+        odin_from_tag=odin_from_tag,
+        odin_tag_x_m=float(odin_from_tag[0, 3]),
+        odin_tag_y_m=float(odin_from_tag[1, 3]),
     )
 
 
 def planar_transform(x_m: float, y_m: float, yaw_rad: float) -> np.ndarray:
     """构造 extnav 实际应用的 SE(2) 嵌入 SE(3) 变换。"""
     return homogeneous(rotation_z(yaw_rad), np.array((x_m, y_m, 0.0)))
+
+
+def project_fcu_reference_pose(
+    odin_from_imu: np.ndarray,
+    correction: tuple[float, float, float] | None,
+    lever_arm_m: np.ndarray,
+) -> FcuReferencePose:
+    """复算零安装角基线下最终飞控中心，保持既有 z 局部约定。"""
+    raw = np.asarray(odin_from_imu, dtype=np.float64).reshape(4, 4)
+    lever = np.asarray(lever_arm_m, dtype=np.float64).reshape(3)
+    if not np.isfinite(raw).all() or not np.isfinite(lever).all():
+        raise ValueError("飞控中心转换输入含非有限值")
+    raw_position = raw[:3, 3]
+    raw_rotation = raw[:3, :3]
+    if correction is None:
+        position = raw_position + lever - raw_rotation @ lever
+        return FcuReferencePose(
+            position=position,
+            rotation=raw_rotation,
+            horizontal_reference_mode="local_identity_origin",
+        )
+
+    x_m, y_m, yaw_rad = (float(value) for value in correction)
+    if not all(math.isfinite(value) for value in (x_m, y_m, yaw_rad)):
+        raise ValueError("世界修正含非有限值")
+    world_rotation = rotation_z(yaw_rad)
+    corrected_rotation = world_rotation @ raw_rotation
+    corrected_position = world_rotation @ raw_position + np.array((x_m, y_m, 0.0))
+    rotated_lever = corrected_rotation @ lever
+    position = corrected_position - rotated_lever
+    # task29 只校准水平世界系；z 继续沿用修补前的局部数值约定。
+    position[2] = raw_position[2] + lever[2] - rotated_lever[2]
+    return FcuReferencePose(
+        position=position,
+        rotation=corrected_rotation,
+        horizontal_reference_mode="tag_world_xy_local_z",
+    )
+
+
+def expected_fcu_jump(
+    odin_from_imu: np.ndarray,
+    old_correction: tuple[float, float, float] | None,
+    new_correction: tuple[float, float, float],
+    lever_arm_m: np.ndarray,
+) -> tuple[float, float]:
+    """在同一新鲜 raw 样本上计算实际水平位置和姿态跳变量。"""
+    old_pose = project_fcu_reference_pose(odin_from_imu, old_correction, lever_arm_m)
+    new_pose = project_fcu_reference_pose(odin_from_imu, new_correction, lever_arm_m)
+    horizontal_jump = float(
+        np.linalg.norm(new_pose.position[:2] - old_pose.position[:2])
+    )
+    relative = new_pose.rotation @ old_pose.rotation.T
+    yaw_jump = abs(wrap_angle(math.atan2(float(relative[1, 0]), float(relative[0, 0]))))
+    return horizontal_jump, yaw_jump

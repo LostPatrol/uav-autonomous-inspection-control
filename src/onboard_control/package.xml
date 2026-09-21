@@ -5,9 +5,9 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>onboard_control</name>
-  <version>1.0.0</version>
-  <description>机载命令仲裁、航点执行、故障保护与 C++ PD+DOB 控制。</description>
-  <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
+  <version>3.3.0</version>
+  <description>Onboard command arbitration, waypoint execution, failsafe and C++ PD+DOB control.</description>
+  <maintainer email="xld@todo.todo">xld</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -17,6 +17,7 @@
   <depend>geometry_msgs</depend>
   <depend>guided_interfaces</depend>
   <depend>mavros_msgs</depend>
+  <depend>libmavconn</depend>
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2</depend>
@@ -26,6 +27,8 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

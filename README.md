@@ -49,14 +49,14 @@ MediaMTX 1.20.0。随后执行：
 ```bash
 git clone https://github.com/LostPatrol/uav-autonomous-inspection-control.git
 cd uav-autonomous-inspection-control
-./setup_ground_station.sh
-./start_ground_all.sh
+./scripts/ground/setup_ground_station.sh
+./scripts/ground/start_ground_all.sh
 ```
 
 只检查环境、不创建飞行会话：
 
 ```bash
-./start_ground_all.sh --check-environment
+./scripts/ground/start_ground_all.sh --check-environment
 ```
 
 进入界面后可点击“启动仿真”运行本地 SITL。仿真固定使用非零隔离域，不与实机 ROS 域混合。
@@ -84,7 +84,7 @@ uav-autonomous-inspection-control/
 │   └── guided_sim/                # SITL/RViz 模型与可视化
 ├── video_service/                 # 独立视频采集、推流、录像和抓拍
 ├── correction_service/            # AprilTag-Odin 修正服务与 extnav 适配
-├── start_drone/                   # 机载组件启动与环境发现
+├── scripts/                       # 地面端、机载端入口与共享运行函数
 ├── examples/                      # 航点 CSV 示例
 ├── assets/                        # 手册与首页图片
 └── 软件详细开发与使用手册.md       # 统一开发、部署与使用文档
@@ -96,16 +96,18 @@ uav-autonomous-inspection-control/
 ## 构建机载软件
 
 ```bash
-./build_onboard_control.sh
+./src/onboard_control/deploy/build_onboard_control.sh
 ```
 
 执行依赖检查、Release 构建和 localhost 隔离冒烟验证：
 
 ```bash
-./build_onboard_control.sh --verify
+./src/onboard_control/deploy/build_onboard_control.sh --verify
 ```
 
 隔离冒烟验证不会连接 MAVROS 或实机，不会发布姿态设定值，也不会产生解锁或起飞命令。
+本独立仓库不分发测试源码，构建入口以 `BUILD_TESTING=OFF` 构建生产包；`--verify`
+不包含单元测试。如需运行完整测试，请使用原工程的测试源码。
 
 ## 视频面板
 

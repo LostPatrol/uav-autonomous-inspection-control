@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <!-- Copyright (c) 2026 北京航空航天大学 -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
-<!-- 按需采集 AprilTag、估计 Odin 平面修正并与 extnav 原子交接。 -->
+<!-- 按需采集多 Tag keyframe、重算滑窗 SE(2) 并与 extnav 原子交接。 -->
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>correction_service</name>
-  <version>1.0.0</version>
-  <description>按需执行 AprilTag 识别并修正 Odin 平面坐标的独立服务。</description>
-  <maintainer email="2823931730@qq.com">北京航空航天大学项目组</maintainer>
+  <version>2.0.0</version>
+  <description>Independent multi-Tag AprilTag-to-Odin window calibration service.</description>
+  <maintainer email="xld@todo.todo">xld</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>
@@ -21,6 +21,8 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

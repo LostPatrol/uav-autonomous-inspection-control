@@ -44,6 +44,7 @@ class AprilTagDetector:
         self._camera_matrix[0, :] *= self._scale
         self._camera_matrix[1, :] *= self._scale
         self._distortion = intrinsics.distortion.copy()
+        self._corner_refinement = settings.corner_refinement
         self._dictionary = cv2.aruco.getPredefinedDictionary(
             cv2.aruco.DICT_APRILTAG_36h11
         )
@@ -58,11 +59,13 @@ class AprilTagDetector:
         parameters.markerBorderBits = 1
         parameters.minMarkerPerimeterRate = 0.01
         parameters.maxMarkerPerimeterRate = 0.9
-        if settings.corner_refinement:
-            parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-            parameters.cornerRefinementWinSize = 7
-            parameters.cornerRefinementMaxIterations = 40
-            parameters.cornerRefinementMinAccuracy = 0.01
+        # 印刷纸张的额外外框可能被旧版 OpenCV 与真正 Tag 合并，并优先保留
+        # 无法解码的大框。缩小候选合并距离（相对周长），保留内部编码黑边；
+        # 不放宽字典纠错、黑边校验或后续 PnP/多 Tag 质量门。
+        parameters.minMarkerDistanceRate = 0.02
+        # 解码后按每个 Tag 的像素格尺寸精修。固定7px半径对小Tag会跨入
+        # 相邻编码格/印刷外框，可能吸附错角点或回退为整数角点。
+        parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE
         self._parameters = parameters
         detector_class = getattr(cv2.aruco, "ArucoDetector", None)
         self._detector = (
@@ -107,6 +110,19 @@ class AprilTagDetector:
             tag = tags.get(marker_id)
             if tag is None:
                 continue
+            if self._corner_refinement:
+                marker_corners = np.asarray(marker_corners, dtype=np.float32).copy()
+                points = marker_corners.reshape(4, 2)
+                shortest_edge = float(np.min(np.linalg.norm(
+                    points - np.roll(points, 1, axis=0), axis=1
+                )))
+                # 36h11为6×6编码加两侧各1格黑边，共8格；半径最多半格，
+                # 且保留历史7px上限。窗口使用检测缩放图对应的像素单位。
+                radius = max(1, min(7, int(shortest_edge / 16)))
+                cv2.cornerSubPix(
+                    image, marker_corners, (radius, radius), (-1, -1),
+                    (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_MAX_ITER, 40, 0.01),
+                )
             detection = self._estimate_pose(marker_id, marker_corners, tag.size_m)
             if detection is not None:
                 detections.append(detection)
