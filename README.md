@@ -120,6 +120,13 @@ uav-autonomous-inspection-control/
 面板可管理本机摄像头、查看机载 RTSP 或打开指定 RTSP 地址。关闭面板不会自动停止后台录像；
 视频服务故障也不会停止、重启或改变飞控任务。
 
+## AprilTag-Odin 修正面板
+
+面板展示多 Tag 滑窗标定、候选质量、extnav 状态及各段位姿对照。下图是在未连接修正服务的
+隔离 ROS 域中截取的界面，仅展示布局，不代表标定或定位精度验证。
+
+![AprilTag-Odin 修正面板](assets/AprilTag-Odin修正面板.png)
+
 ## 版本与授权
 
 - 软件名称：无人机自主巡检地面监控与机载协同控制软件；
