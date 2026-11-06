@@ -1,0 +1,32 @@
+# extnav 当前 Odin session、实际修正和同样本飞控中心转换状态。
+std_msgs/Header header
+string interface_version
+bool service_available
+bool odin_available
+string odin_session_id
+bool correction_valid
+uint64 revision
+uint8 reset_counter
+float64 correction_x_m
+float64 correction_y_m
+float64 correction_yaw_deg
+string applied_job_id
+string horizontal_reference_mode
+float64 lever_arm_x_m
+float64 lever_arm_y_m
+float64 lever_arm_z_m
+float64 installation_roll_rad
+float64 installation_pitch_rad
+float64 installation_yaw_rad
+uint64 final_pose_messages
+# 最近一个可发布最终样本自身的冻结元数据；状态切换后在下一条 raw 前 unavailable。
+bool final_sample_available
+bool final_sample_correction_valid
+uint64 final_sample_revision
+string final_sample_odin_session_id
+string final_sample_reference_mode
+float64 raw_age_s
+uint64 raw_messages
+uint64 corrected_messages
+string last_event
+string last_error

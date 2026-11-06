@@ -1,0 +1,30 @@
+# Camera optical -> FCU FLU: p_fcu = R_FC*p_camera + t_FC (metres).
+transform_name: T_fcu_camera
+matrix:
+  rows: 4
+  cols: 4
+  data:
+  - 0.0
+  - -1.0
+  - 0.0
+  - 0.107
+  - -1.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+  - -1.0
+  - -0.015
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+quality:
+  passed: false
+  status: mechanical_estimate_unverified
+provenance:
+  translation_axes: FCU FLU
+  translation_units: m
+  orientation_source: downward_optical_axis_image_up_forward_image_right_right
+  dimensions_source: user_confirmed_2026-11-02

@@ -1,0 +1,125 @@
+{
+  "software": "无人机机载航点导航与轨迹跟踪控制软件",
+  "version": "V1.0",
+  "source_baseline": "048bde8459d4c18f7deb9e44dab02aa94e323013",
+  "listing_rule": "UTF-8文件按source_files次序连接；去除注释、文档字符串及空行，保留程序文本；Tab展开为4空格。",
+  "total_program_lines": 6435,
+  "submitted_lines": 3000,
+  "selected_ranges": [
+    [
+      1,
+      1500
+    ],
+    [
+      4936,
+      6435
+    ]
+  ],
+  "files": [
+    {
+      "path": "src/onboard_control/include/onboard_control/avoidance_trajectory.hpp",
+      "sha256": "e194f6d355b7b81336e3e21a1b7ee442fcca11aad1db63bc7cde52de6f2fed7e",
+      "start_line": 1,
+      "end_line": 208,
+      "program_lines": 208
+    },
+    {
+      "path": "src/onboard_control/include/onboard_control/dob_controller.hpp",
+      "sha256": "92215b4d363e1d858bdcad5aa2dad6406e3701ae52a349391853ce0a07e0bd81",
+      "start_line": 209,
+      "end_line": 277,
+      "program_lines": 69
+    },
+    {
+      "path": "src/onboard_control/include/onboard_control/navigation_frame.hpp",
+      "sha256": "fc5d8c349928706c5159316872be33098deb68d15bc2e161d8147907d617a273",
+      "start_line": 278,
+      "end_line": 365,
+      "program_lines": 88
+    },
+    {
+      "path": "src/onboard_control/include/onboard_control/onboard_control_node.hpp",
+      "sha256": "3acf8aaaae00570c264ace3580fb1d99b268e19ba70e74211847a0c1c33a5bb5",
+      "start_line": 366,
+      "end_line": 987,
+      "program_lines": 622
+    },
+    {
+      "path": "src/onboard_control/include/onboard_control/reference_generator.hpp",
+      "sha256": "994f71eb2d66554904810e8afff0d84a880a67c8c00a5b2e81f820bf394c69a3",
+      "start_line": 988,
+      "end_line": 1089,
+      "program_lines": 102
+    },
+    {
+      "path": "src/onboard_control/include/onboard_control/waypoint_arrival_tracker.hpp",
+      "sha256": "928f758740b953365fc696f6605173ccc9403bf3159b4b9cb3eead2ca70dff22",
+      "start_line": 1090,
+      "end_line": 1229,
+      "program_lines": 140
+    },
+    {
+      "path": "src/onboard_control/src/avoidance_execution.cpp",
+      "sha256": "898cdbe090113e320069ee6726e549656fc7ec84c0d7a955610274d5efda6f73",
+      "start_line": 1230,
+      "end_line": 1711,
+      "program_lines": 482
+    },
+    {
+      "path": "src/onboard_control/src/control_diagnostics.cpp",
+      "sha256": "6a2255860a7f912f9dbe2785c7d7c6ad83fca5241b9bc30d976715ecb5e62593",
+      "start_line": 1712,
+      "end_line": 2052,
+      "program_lines": 341
+    },
+    {
+      "path": "src/onboard_control/src/dob_controller.cpp",
+      "sha256": "e2956c89566b2481d590dd24097f2d3dfaf156e689e82ef5af632917dcc2b658",
+      "start_line": 2053,
+      "end_line": 2241,
+      "program_lines": 189
+    },
+    {
+      "path": "src/onboard_control/src/fcu_reboot.cpp",
+      "sha256": "d11209383da9d96a2371ef17fcca7ea0f33ecc9974cfc509f7c2e4fd6d3aaf46",
+      "start_line": 2242,
+      "end_line": 2458,
+      "program_lines": 217
+    },
+    {
+      "path": "src/onboard_control/src/main.cpp",
+      "sha256": "d90a1bd53b169c9bbe6cdcf1acd5b99f11a02fc7c940266ad7721e820c9faedd",
+      "start_line": 2459,
+      "end_line": 2472,
+      "program_lines": 14
+    },
+    {
+      "path": "src/onboard_control/src/navigation_frame.cpp",
+      "sha256": "e9cc434597abbbc9bab0ade53e80500b4de09d182b21bd7a4943f2c9dfe8f875",
+      "start_line": 2473,
+      "end_line": 2843,
+      "program_lines": 371
+    },
+    {
+      "path": "src/onboard_control/src/onboard_control_node.cpp",
+      "sha256": "4ba578e5047cb59ef69a243511bebbdc3f587e4d454549595b2ae06424896ba7",
+      "start_line": 2844,
+      "end_line": 5482,
+      "program_lines": 2639
+    },
+    {
+      "path": "src/onboard_control/src/reference_generator.cpp",
+      "sha256": "c568c786f1fbbde396c004447fc9cf96bcb6ead59e4690da0a36b31e50bfe861",
+      "start_line": 5483,
+      "end_line": 5980,
+      "program_lines": 498
+    },
+    {
+      "path": "src/onboard_control/src/waypoint_calibration.cpp",
+      "sha256": "1b9c5607c5a44ab7df7b981ae97e5204db99625a3605b6239528c42be293ff30",
+      "start_line": 5981,
+      "end_line": 6435,
+      "program_lines": 455
+    }
+  ]
+}

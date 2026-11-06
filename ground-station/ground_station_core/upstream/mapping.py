@@ -1,0 +1,218 @@
+"""上位机协议命令到现有地面站动作的集中映射与字段转换。"""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from ..waypoint_io import Waypoint, WaypointCollection
+from .models import UpstreamAction, UpstreamCommand
+from ..config import (MAX_WAYPOINT_COUNT, WAYPOINT_HORIZONTAL_LIMIT_METERS,
+                      WAYPOINT_Z_MIN_METERS, WAYPOINT_Z_MAX_METERS)
+
+
+class UpstreamProtocolError(ValueError):
+    """业务 JSON 无法安全映射为地面站动作时抛出。"""
+
+
+@dataclass(frozen=True)
+class CommandMapping:
+    """一条可由面板直接展示的稳定命令映射。"""
+
+    command_no: str
+    label: str
+    action: UpstreamAction
+    local_effect: str
+
+
+# 后续对接调整只需修改本文件；Qt 和 WebSocket 核心不复制业务编号。
+COMMAND_MAPPINGS: tuple[CommandMapping, ...] = (
+    CommandMapping("01", "起飞", UpstreamAction.TAKEOFF, "执行地面站起飞操作"),
+    CommandMapping(
+        "02",
+        "巡检任务下发",
+        UpstreamAction.STAGE_WAYPOINTS,
+        "原子替换地面站航点列表",
+    ),
+    CommandMapping(
+        "03",
+        "执行巡检任务",
+        UpstreamAction.EXECUTE_WAYPOINTS,
+        "起飞至设定高度、执行巡检航点，完成后在末点降落",
+    ),
+    CommandMapping(
+        "05",
+        "一键返航",
+        # 按已确认约定，05 保持与 07 相同的紧急原地降落动作。
+        UpstreamAction.EMERGENCY_LAND,
+        "暂按紧急降落处理，原地降落",
+    ),
+    CommandMapping("06", "降落", UpstreamAction.LAND, "执行地面站降落操作"),
+    CommandMapping("07", "紧急停机", UpstreamAction.EMERGENCY_LAND, "立即原地降落"),
+)
+# 按命令编号索引，避免各调用方重复定义映射。
+_MAPPINGS_BY_NO = {item.command_no: item for item in COMMAND_MAPPINGS}
+
+# 航点必须提供的协议字段。
+_REQUIRED_POINT_FIELDS = (
+    "index",
+    "x",
+    "y",
+    "z",
+    "forwardAngle",
+    "cameraAngle",
+    "photoNo",
+)
+
+
+def parse_command(
+    payload: Mapping[str, Any], expected_client_no: str, coordinate_frame: str = "odom"
+) -> UpstreamCommand:
+    """校验业务 JSON，并把角度制航向转换为本地弧度制航点。"""
+    if not isinstance(payload, Mapping):
+        raise UpstreamProtocolError("命令必须是 JSON 对象")
+    client_no = _client_no(payload.get("clientNo"))
+    if client_no != _client_no(expected_client_no):
+        raise UpstreamProtocolError(
+            f"命令 clientNo={client_no!r} 与当前无人机编号不一致"
+        )
+    command_no = payload.get("commandNo")
+    mapping = _MAPPINGS_BY_NO.get(command_no)
+    if mapping is None:
+        raise UpstreamProtocolError(f"不支持的 commandNo: {command_no!r}")
+
+    # 旧工具可省略元数据；显式提供时严格校验，不按时间新鲜度拒绝。
+    command_id = payload.get("id", "")
+    if "id" in payload:
+        try:
+            if (
+                not isinstance(command_id, str)
+                or str(UUID(command_id)) != command_id.lower()
+            ):
+                raise ValueError("UUID 格式不标准")
+        except ValueError as exc:
+            raise UpstreamProtocolError("id 必须是标准 UUID 字符串") from exc
+    flight_type = payload.get("type", 0)
+    if (
+        isinstance(flight_type, bool)
+        or not isinstance(flight_type, int)
+        or flight_type not in (0, 1)
+    ):
+        raise UpstreamProtocolError("type 必须是整数 0（实机）或 1（仿真）")
+    timestamp_ms = payload.get("timestamp")
+    if "timestamp" in payload and (
+        isinstance(timestamp_ms, bool)
+        or not isinstance(timestamp_ms, int)
+        or timestamp_ms < 0
+    ):
+        raise UpstreamProtocolError("timestamp 必须是非负整数毫秒时间戳")
+
+    waypoints: WaypointCollection = ()
+    point_indexes: tuple[int, ...] = ()
+    photo_nos: tuple[str, ...] = ()
+    ignored = False
+    if command_no == "02":
+        waypoints, point_indexes, photo_nos = _parse_task_points(
+            payload.get("taskPoints"), coordinate_frame
+        )
+        ignored = True
+    return UpstreamCommand(
+        client_no=client_no,
+        command_no=command_no,
+        label=mapping.label,
+        action=mapping.action,
+        raw_payload=deepcopy(dict(payload)),
+        waypoints=waypoints,
+        point_indexes=point_indexes,
+        photo_nos=photo_nos,
+        ignored_camera_fields=ignored,
+        command_id=command_id,
+        flight_type=flight_type,
+        timestamp_ms=timestamp_ms,
+    )
+
+
+def _parse_task_points(
+    value: Any, coordinate_frame: str = "odom",
+) -> tuple[
+    WaypointCollection,
+    tuple[int, ...],
+    tuple[str, ...],
+]:
+    """校验飞行字段，并按协议顺序原样带出 point index 与 photoNo。"""
+    if not isinstance(value, list) or not value:
+        raise UpstreamProtocolError("commandNo=02 的 taskPoints 必须是非空数组")
+    if len(value) > MAX_WAYPOINT_COUNT:
+        raise UpstreamProtocolError(f"taskPoints 最多允许 {MAX_WAYPOINT_COUNT} 个航点")
+
+    normalized: list[Waypoint] = []
+    indexes: list[int] = []
+    photo_nos: list[str] = []
+    for position, point in enumerate(value, start=1):
+        if not isinstance(point, Mapping):
+            raise UpstreamProtocolError(f"taskPoints[{position}] 必须是 JSON 对象")
+        missing = [field for field in _REQUIRED_POINT_FIELDS if field not in point]
+        if missing:
+            raise UpstreamProtocolError(
+                f"taskPoints[{position}] 缺少字段: {', '.join(missing)}"
+            )
+        index = point["index"]
+        photo_no = point["photoNo"]
+        if isinstance(index, bool) or not isinstance(index, int) or index < 1:
+            raise UpstreamProtocolError(f"taskPoints[{position}].index 必须是正整数")
+        if index in indexes:
+            raise UpstreamProtocolError(f"taskPoints index={index} 重复")
+        x = _finite_number(point["x"], f"taskPoints[{position}].x")
+        y = _finite_number(point["y"], f"taskPoints[{position}].y")
+        z = _finite_number(point["z"], f"taskPoints[{position}].z")
+        angle = _finite_number(
+            point["forwardAngle"], f"taskPoints[{position}].forwardAngle"
+        )
+        _finite_number(point["cameraAngle"], f"taskPoints[{position}].cameraAngle")
+        if abs(x) > WAYPOINT_HORIZONTAL_LIMIT_METERS or abs(y) > (
+            WAYPOINT_HORIZONTAL_LIMIT_METERS
+        ):
+            raise UpstreamProtocolError(f"taskPoints[{position}] 的 X/Y 超出地面站范围")
+        # 地图高度可为负值，由机载端校验转换后的本地 Z。
+        low, high = ((WAYPOINT_Z_MIN_METERS, WAYPOINT_Z_MAX_METERS)
+                     if coordinate_frame == "map" else (0.1, 50.0))
+        if not low <= z <= high:
+            raise UpstreamProtocolError(
+                f"taskPoints[{position}].z 必须在 [{low:g}, {high:g}] m 范围内（{coordinate_frame}）"
+            )
+        normalized_angle = ((angle + 180.0) % 360.0) - 180.0
+        normalized.append(Waypoint(x, y, z, math.radians(normalized_angle), is_inspection=True))
+        indexes.append(index)
+        # photoNo 是生产环境文件标识，不校验递增、重复、正负、类型或范围。
+        # JSON 紧凑序列化保留结构和值；文件名层再做可逆转义。
+        photo_nos.append(
+            json.dumps(photo_no, ensure_ascii=False, separators=(",", ":"))
+            if not isinstance(photo_no, str)
+            else photo_no
+        )
+    return tuple(normalized), tuple(indexes), tuple(photo_nos)
+
+
+def _client_no(value: Any) -> str:
+    """校验无人机编号可安全嵌入主题路径。"""
+    if not isinstance(value, str) or not value.strip():
+        raise UpstreamProtocolError("clientNo 必须是非空字符串")
+    cleaned = value.strip()
+    if any(character in cleaned for character in ("/", "\\", "#", "+")):
+        raise UpstreamProtocolError("clientNo 不能包含主题路径或通配符字符")
+    return cleaned
+
+
+def _finite_number(value: Any, field: str) -> float:
+    """解析有限 JSON 数值并明确排除布尔值、NaN 与无穷大。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise UpstreamProtocolError(f"{field} 必须是数值")
+    result = float(value)
+    if not math.isfinite(result):
+        raise UpstreamProtocolError(f"{field} 必须是有限数值")
+    return result

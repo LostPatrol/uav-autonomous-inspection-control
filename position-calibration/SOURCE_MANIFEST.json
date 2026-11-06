@@ -1,0 +1,167 @@
+{
+  "software": "无人机视觉标志辅助定位校准软件",
+  "version": "V1.0",
+  "source_baseline": "048bde8459d4c18f7deb9e44dab02aa94e323013",
+  "listing_rule": "UTF-8文件按source_files次序连接；去除注释、文档字符串及空行，保留程序文本；Tab展开为4空格。",
+  "total_program_lines": 7417,
+  "submitted_lines": 3000,
+  "selected_ranges": [
+    [
+      1,
+      1500
+    ],
+    [
+      5918,
+      7417
+    ]
+  ],
+  "files": [
+    {
+      "path": "correction_service/correction_service/config.py",
+      "sha256": "6e04c465aedf9725da02c36d73ae0482e7222f7d1da1ab38d77198948c319582",
+      "start_line": 1,
+      "end_line": 630,
+      "program_lines": 630
+    },
+    {
+      "path": "correction_service/correction_service/geometry.py",
+      "sha256": "438e6057b31b03b60710b746ad48b0c4b25378c9d527c9a8fa49601b5851a575",
+      "start_line": 631,
+      "end_line": 808,
+      "program_lines": 178
+    },
+    {
+      "path": "correction_service/correction_service/estimator.py",
+      "sha256": "c82451a5f9a34b4cca83e32f55e0d12e67eb204767c83b60677d2a0f27910532",
+      "start_line": 809,
+      "end_line": 1139,
+      "program_lines": 331
+    },
+    {
+      "path": "correction_service/correction_service/window.py",
+      "sha256": "0ef91b3a79a63b6e0470e794f3f3b28efade03fbd9ffe35d773041abe270c7ba",
+      "start_line": 1140,
+      "end_line": 1414,
+      "program_lines": 275
+    },
+    {
+      "path": "correction_service/correction_service/synchronizer.py",
+      "sha256": "2bfe938474aaf02d5f01e7b953c5340b11778a7032fedabbc35dc0dc874acc5c",
+      "start_line": 1415,
+      "end_line": 1427,
+      "program_lines": 13
+    },
+    {
+      "path": "correction_service/correction_service/native_odometry.py",
+      "sha256": "ed6e4333ddcb8cb5514211f7379aa8c71587445a68af5809de514dbaf41a7855",
+      "start_line": 1428,
+      "end_line": 1471,
+      "program_lines": 44
+    },
+    {
+      "path": "correction_service/correction_service/detector.py",
+      "sha256": "3a1222001cf0dda0f77752ef6e80d536eb7bdc452813e2bb94ce4f9fb93cadf9",
+      "start_line": 1472,
+      "end_line": 1547,
+      "program_lines": 76
+    },
+    {
+      "path": "correction_service/correction_service/camera_process.py",
+      "sha256": "22a4f987a6ce7db77968e44367f0a86139520ba3c063793a358895f89db519e6",
+      "start_line": 1548,
+      "end_line": 1737,
+      "program_lines": 190
+    },
+    {
+      "path": "correction_service/correction_service/journal.py",
+      "sha256": "9f46b7636560cc6813f6a6b6c3fb09140a95773f9676d437ad14e8262c840cee",
+      "start_line": 1738,
+      "end_line": 1795,
+      "program_lines": 58
+    },
+    {
+      "path": "correction_service/correction_service/node.py",
+      "sha256": "79ab1bfeadb794b7e1c5e99944301a14d9fc6eb1f1fe82810085bdf500bd7b66",
+      "start_line": 1796,
+      "end_line": 4186,
+      "program_lines": 2391
+    },
+    {
+      "path": "correction_service/correction_service/ros_client.py",
+      "sha256": "37c7bd9fc123d0e8f2832a57649c598758422586cb8166039fd42952a9e397d8",
+      "start_line": 4187,
+      "end_line": 4802,
+      "program_lines": 616
+    },
+    {
+      "path": "correction_service/correction_service/tag_editor.py",
+      "sha256": "19cab93043be38bce8a04e640d7718694df4845e6cad5a8545e8b0df94b79920",
+      "start_line": 4803,
+      "end_line": 5162,
+      "program_lines": 360
+    },
+    {
+      "path": "correction_service/correction_service/correction_panel.py",
+      "sha256": "192f759d5d337afafec75f84ebe542c7efd3016f865dcdc6bcbd522e59f2692b",
+      "start_line": 5163,
+      "end_line": 5936,
+      "program_lines": 774
+    },
+    {
+      "path": "src/correction_native/src/odometry.cpp",
+      "sha256": "fac0803d184a51bb94a1787e43370bfc9b4ea21d46adcf37bdf3ddbfd8169f83",
+      "start_line": 5937,
+      "end_line": 6163,
+      "program_lines": 227
+    },
+    {
+      "path": "src/correction_native/src/vision.cpp",
+      "sha256": "578ed2545a172a67b9555630013e6b0fabddf2c2c7c67d30857e68ca40569690",
+      "start_line": 6164,
+      "end_line": 6244,
+      "program_lines": 81
+    },
+    {
+      "path": "src/correction_native/src/uvc_camera.cpp",
+      "sha256": "8412a4e7a991154e867257fe4761141309fb39687bf149e4c2b48fa02af677ea",
+      "start_line": 6245,
+      "end_line": 6548,
+      "program_lines": 304
+    },
+    {
+      "path": "src/correction_native/src/bindings.cpp",
+      "sha256": "1123e94da90cf5ac6d1aa57ce69332e4eda8da146328a0cf0ef27c835b1b8889",
+      "start_line": 6549,
+      "end_line": 6676,
+      "program_lines": 128
+    },
+    {
+      "path": "src/correction_native/include/correction_native/odometry.hpp",
+      "sha256": "1cc2c7bd54e9e021837845a0f7e9d3cb8398b43ce2a85491e97c35ecafecaf2c",
+      "start_line": 6677,
+      "end_line": 6738,
+      "program_lines": 62
+    },
+    {
+      "path": "src/correction_native/include/correction_native/vision.hpp",
+      "sha256": "5ed73c0841227cba17511e293c1da6e8a45f33bb87ea46ca9584aa1f140f7165",
+      "start_line": 6739,
+      "end_line": 6773,
+      "program_lines": 35
+    },
+    {
+      "path": "src/extnav_bridge/src/extnav_to_vision_pose.cpp",
+      "sha256": "78968ce3af5e6dcf976b3e7e5239416490eb44776a7dc73fb56387220a4d2c2e",
+      "start_line": 6774,
+      "end_line": 7259,
+      "program_lines": 486
+    },
+    {
+      "path": "src/extnav_bridge/include/extnav_bridge/math.hpp",
+      "sha256": "0e53f51012c2fe15991e5cee1d0e8a65180b55d6b5e40138b20f4c8315cfce14",
+      "start_line": 7260,
+      "end_line": 7417,
+      "program_lines": 158
+    }
+  ]
+}

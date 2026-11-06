@@ -1,0 +1,744 @@
+"""加载相机标定和修正任务参数，并校验、保存 Tag 世界位姿。"""
+
+from __future__ import annotations
+
+import configparser
+import csv
+import hashlib
+import io
+import math
+import os
+import re
+import tempfile
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import yaml
+
+_ROS_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class Intrinsics:
+    """固定分辨率下的 OpenCV 针孔内参与畸变。"""
+
+    width: int
+    height: int
+    camera_matrix: np.ndarray
+    distortion: np.ndarray
+    # 理论内参没有重投影误差；只有真实标定结果才提供该值。
+    calibration_rms_px: float | None
+
+
+@dataclass(frozen=True)
+class TagPose:
+    """Tag 坐标系在车间世界系中的绝对位姿和检测边长。"""
+
+    tag_id: int
+    x: float
+    y: float
+    z: float
+    yaw_rad: float
+    size_m: float
+
+
+@dataclass(frozen=True)
+class CameraSettings:
+    """只含采集所需的相机和本包 UVC 驱动参数。"""
+
+    device: str
+    width: int
+    height: int
+    fps: int
+    publish_fps: float
+    pixel_format: str
+    frame_id: str
+    image_topic: str
+    max_capture_age_ms: float
+    driver_package: str
+    driver_executable: str
+
+
+@dataclass(frozen=True)
+class DetectionSettings:
+    """AprilTag 检测与单帧几何质量阈值。"""
+
+    tag_family: str
+    processing_rate_hz: float
+    image_scale: float
+    corner_refinement: bool
+    max_reprojection_error_px: float
+    max_correction_tilt_deg: float
+    # 仅保留旧配置兼容；采样始终只选预期 ID，不再按同帧 Tag 数量拒绝。
+    reject_multiple_tags: bool
+
+
+@dataclass(frozen=True)
+class SynchronizationSettings:
+    """图像时间戳与 Odin 历史样本匹配限制。"""
+
+    odometry_history_seconds: float
+    max_header_delta_ms: float
+    max_arrival_delta_ms: float
+    header_epoch_tolerance_seconds: float
+
+
+@dataclass(frozen=True)
+class QualitySettings:
+    """滚动稳健估计的收敛和发散阈值。"""
+
+    minimum_samples: int
+    rolling_window_samples: int
+    minimum_span_seconds: float
+    max_position_std_m: float
+    max_yaw_std_rad: float
+    max_position_range_m: float
+    max_yaw_range_rad: float
+    divergence_position_range_m: float
+    divergence_yaw_range_rad: float
+    mad_outlier_scale: float
+
+
+@dataclass(frozen=True)
+class KeyframeSettings:
+    """单个停留段的独立时间块、误差下限和同步运动门。"""
+
+    correlation_block_seconds: float
+    minimum_independent_blocks: int
+    odin_position_noise_floor_m: float
+    tag_world_sigma_m: float
+    extrinsic_sigma_m: float
+    minimum_effective_sigma_m: float
+    maximum_effective_sigma_m: float
+    max_sync_motion_error_m: float
+
+
+@dataclass(frozen=True)
+class WindowSettings:
+    """跨 Tag FIFO、二维刚体配准、老化和应用跳变阈值。"""
+
+    default_size: int
+    maximum_size: int
+    minimum_baseline_m: float
+    maximum_baseline_ratio_error: float
+    maximum_window_span_seconds: float
+    maximum_keyframe_gap_seconds: float
+    candidate_max_age_seconds: float
+    max_registration_rms_m: float
+    max_registration_residual_m: float
+    max_model_yaw_std_rad: float
+    max_prior_model_residual_m: float
+    max_apply_position_jump_m: float
+    max_apply_yaw_jump_rad: float
+    recommended_precision_keyframes: int
+
+
+@dataclass(frozen=True)
+class FcuReferenceSettings:
+    """用于应用跳变复算的 extnav 既有局部原点偏移。"""
+
+    lever_arm_m: np.ndarray
+    parameter_tolerance: float
+
+
+@dataclass(frozen=True)
+class TimeoutSettings:
+    """相机、首个 Tag、extnav ACK 与地面任务生命周期限制。"""
+
+    camera_start_seconds: float
+    first_tag_seconds: float
+    extnav_apply_seconds: float
+    extnav_reconcile_seconds: float
+    ground_max_runtime_seconds: float
+
+
+@dataclass(frozen=True)
+class LoggingSettings:
+    """模块内日志目录与轮转配置。"""
+
+    directory: Path
+    service_log_max_bytes: int
+    service_log_backups: int
+    sample_summary_period_seconds: float
+
+
+@dataclass(frozen=True)
+class ServiceConfig:
+    """correction_service 的完整、已验证配置快照。"""
+
+    config_dir: Path
+    interface_version: str
+    config_fingerprint: str
+    topics: dict[str, str]
+    intrinsics: Intrinsics
+    t_fcu_camera: np.ndarray
+    tags: dict[int, TagPose]
+    camera: CameraSettings
+    lens_controls: dict[str, int]
+    detection: DetectionSettings
+    synchronization: SynchronizationSettings
+    quality: QualitySettings
+    keyframe: KeyframeSettings
+    window: WindowSettings
+    fcu_reference: FcuReferenceSettings
+    timeouts: TimeoutSettings
+    logging: LoggingSettings
+
+
+def _mapping(value: Any, name: str) -> dict[str, Any]:
+    """要求 YAML 节点为映射并保留可读错误路径。"""
+    if not isinstance(value, dict):
+        raise TypeError(f"{name} 必须是映射")
+    return value
+
+
+def _finite(value: Any, name: str) -> float:
+    """解析一个有限浮点数。"""
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} 必须是有限数")
+    return result
+
+
+def _positive(value: Any, name: str, *, allow_zero: bool = False) -> float:
+    """解析正数；仅明确配置的总时限允许为零。"""
+    result = _finite(value, name)
+    if result < 0.0 or (result == 0.0 and not allow_zero):
+        relation = "非负" if allow_zero else "正"
+        raise ValueError(f"{name} 必须为{relation}数")
+    return result
+
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    """读取标准 YAML，拒绝空文件和非映射根节点。"""
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"无法读取配置 {path}: {exc}") from exc
+    return _mapping(loaded, str(path))
+
+
+def _matrix(spec: Any, rows: int, cols: int, name: str) -> np.ndarray:
+    """从 rows/cols/data 结构构造固定形状矩阵。"""
+    mapping = _mapping(spec, name)
+    if int(mapping.get("rows", -1)) != rows or int(mapping.get("cols", -1)) != cols:
+        raise ValueError(f"{name} 必须是 {rows}x{cols} 矩阵")
+    data = np.asarray(mapping.get("data", []), dtype=np.float64)
+    if data.size != rows * cols or not np.isfinite(data).all():
+        raise ValueError(f"{name}.data 数量或有限性无效")
+    return data.reshape(rows, cols)
+
+
+def _load_intrinsics(config_dir: Path) -> Intrinsics:
+    """加载并验证分辨率、焦距矩阵和畸变向量。"""
+    data = _load_yaml(config_dir / "intrinsics.yaml")
+    width = int(data.get("image_width", 0))
+    height = int(data.get("image_height", 0))
+    matrix = _matrix(data.get("camera_matrix"), 3, 3, "camera_matrix")
+    distortion_spec = _mapping(
+        data.get("distortion_coefficients"), "distortion_coefficients"
+    )
+    distortion = np.asarray(distortion_spec.get("data", []), dtype=np.float64).reshape(
+        -1
+    )
+    if width <= 0 or height <= 0:
+        raise ValueError("相机标定分辨率必须为正整数")
+    if distortion.size not in (4, 5, 8, 12, 14) or not np.isfinite(distortion).all():
+        raise ValueError("畸变系数数量或有限性无效")
+    if (
+        matrix[0, 0] <= 0.0
+        or matrix[1, 1] <= 0.0
+        or not np.allclose(matrix[2], (0, 0, 1))
+    ):
+        raise ValueError("camera_matrix 不是有效针孔内参")
+    return Intrinsics(
+        width=width,
+        height=height,
+        camera_matrix=matrix,
+        distortion=distortion,
+        calibration_rms_px=(
+            None
+            if data.get("rms_reprojection_error") is None
+            else _positive(
+                data.get("rms_reprojection_error"), "rms_reprojection_error"
+            )
+        ),
+    )
+
+
+def _load_extrinsics(config_dir: Path) -> np.ndarray:
+    """加载相机光学系到 FCU FLU 的 T_fcu_camera。"""
+    data = _load_yaml(config_dir / "extrinsics.yaml")
+    if data.get("transform_name") != "T_fcu_camera":
+        raise ValueError("相机外参必须明确为 T_fcu_camera，请迁移旧 IMU 外参")
+    transform = _matrix(data.get("matrix"), 4, 4, "T_fcu_camera")
+    rotation = transform[:3, :3]
+    if not np.allclose(transform[3], (0, 0, 0, 1), atol=1e-9):
+        raise ValueError("T_fcu_camera 齐次末行无效")
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-6):
+        raise ValueError("T_fcu_camera 旋转矩阵不正交")
+    if not math.isclose(float(np.linalg.det(rotation)), 1.0, abs_tol=1e-6):
+        raise ValueError("T_fcu_camera 旋转矩阵行列式不为 1")
+    return transform
+
+
+def _load_tags(config_dir: Path) -> dict[int, TagPose]:
+    """加载人工维护的 Tag 世界坐标，拒绝重复 ID 与非正边长。"""
+    path = config_dir / "tag_pose.csv"
+    try:
+        return parse_tag_csv(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"无法读取 {path}: {exc}") from exc
+
+
+# CSV 字段及顺序同时用于文件、远端接口与配置表格。
+TAG_COLUMNS = ("tag_id", "x", "y", "z", "yaw_deg", "size_m")
+
+
+def parse_tag_csv(text: str) -> dict[int, TagPose]:
+    """统一检查 CSV：ID 唯一非负、数值有限、边长为正且至少一行。"""
+    reader = csv.DictReader(io.StringIO(text))
+    if tuple(reader.fieldnames or ()) != TAG_COLUMNS:
+        raise ValueError(f"tag_pose.csv 表头必须为 {','.join(TAG_COLUMNS)}")
+    tags: dict[int, TagPose] = {}
+    for line_number, row in enumerate(reader, start=2):
+        try:
+            tag_id = int(row["tag_id"])
+            if not 0 <= tag_id <= 2_147_483_647 or tag_id in tags:
+                raise ValueError("ID 必须唯一且位于 0～2147483647")
+            if None in row:
+                raise ValueError("列数必须为 6")
+            values = [_finite(row[key], key) for key in TAG_COLUMNS[1:]]
+            if values[-1] <= 0:
+                raise ValueError("size_m 必须大于 0")
+            tags[tag_id] = TagPose(tag_id, *values[:3], math.radians(values[3]), values[4])
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError(f"tag_pose.csv 第 {line_number} 行：{exc}") from exc
+    if not tags:
+        raise ValueError("tag_pose.csv 至少需要一个 Tag")
+    return dict(sorted(tags.items()))
+
+
+def format_tag_csv(tags: dict[int, TagPose]) -> str:
+    """按数值 ID 升序输出可直接编辑的六列表格文件。"""
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(TAG_COLUMNS)
+    for tag_id, tag in sorted(tags.items()):
+        writer.writerow((tag_id, tag.x, tag.y, tag.z, math.degrees(tag.yaw_rad), tag.size_m))
+    return stream.getvalue()
+
+
+def save_tag_config(config: ServiceConfig, text: str) -> ServiceConfig:
+    """校验后原子替换 CSV，仅更新内存 Tag 配置与指纹，其余参数保持。"""
+    tags = parse_tag_csv(text)
+    canonical = format_tag_csv(tags)
+    root = config.config_dir
+    general = _load_yaml(root / "general_settings.yaml")
+    extrinsics = (root / Path(general["fcu_reference"]["extrinsics_file"]).expanduser()).resolve()
+    fingerprint = _configuration_fingerprint(root, extrinsics, tag_csv=canonical)
+    path = root / "tag_pose.csv"
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="",
+                                         dir=root, prefix=".tag_pose-", delete=False) as stream:
+            temporary_path = Path(stream.name)
+            stream.write(canonical)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.chmod(path.stat().st_mode & 0o777)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return replace(config, tags=tags, config_fingerprint=fingerprint)
+
+
+def _load_ini(path: Path) -> configparser.ConfigParser:
+    """读取带注释的 INI 配置并禁用隐式字符串插值。"""
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            parser.read_file(stream)
+    except (OSError, configparser.Error) as exc:
+        raise ValueError(f"无法读取配置 {path}: {exc}") from exc
+    return parser
+
+
+def _load_camera(config_dir: Path) -> CameraSettings:
+    """加载采集节点配置；命令始终以参数列表启动，不经过 shell。"""
+    parser = _load_ini(config_dir / "camera.conf")
+    package = parser.get("driver", "package", fallback="").strip()
+    executable = parser.get("driver", "executable", fallback="").strip()
+    if not _ROS_NAME.fullmatch(package) or not _ROS_NAME.fullmatch(executable):
+        raise ValueError("相机 ROS package/executable 名称无效")
+    if (package, executable) != ("correction_service", "uvc_camera_node"):
+        raise ValueError("相机必须使用本包 correction_service/uvc_camera_node，请更新 camera.conf")
+    settings = CameraSettings(
+        device=parser.get("camera", "device", fallback="").strip(),
+        width=parser.getint("camera", "width", fallback=0),
+        height=parser.getint("camera", "height", fallback=0),
+        fps=parser.getint("camera", "fps", fallback=0),
+        publish_fps=parser.getfloat("camera", "publish_fps", fallback=30.0),
+        pixel_format=parser.get("camera", "pixel_format", fallback="").strip().lower(),
+        frame_id=parser.get("camera", "frame_id", fallback="").strip(),
+        image_topic=parser.get("camera", "image_topic", fallback="").strip(),
+        max_capture_age_ms=parser.getfloat(
+            "camera", "max_capture_age_ms", fallback=0.0
+        ),
+        driver_package=package,
+        driver_executable=executable,
+    )
+    if not settings.device.startswith("/dev/"):
+        raise ValueError("camera.device 必须是明确的 /dev 路径")
+    if settings.width <= 0 or settings.height <= 0 or settings.fps <= 0:
+        raise ValueError("camera width/height/fps 必须为正整数")
+    if settings.pixel_format != "mjpeg":
+        raise ValueError("当前 UVC 相机节点只支持 mjpeg")
+    if not settings.image_topic.startswith("/") or not settings.frame_id:
+        raise ValueError("camera image_topic/frame_id 无效")
+    _positive(settings.max_capture_age_ms, "camera.max_capture_age_ms")
+    if _finite(settings.publish_fps, "camera.publish_fps") < 0:
+        raise ValueError("camera.publish_fps 必须非负；0 表示不限制解码/发布频率")
+    return settings
+
+
+def _load_lens(config_dir: Path) -> dict[str, int]:
+    """只允许已知且经标定使用的 V4L2 整数控制项。"""
+    parser = _load_ini(config_dir / "lens.conf")
+    allowed = {
+        "brightness",
+        "contrast",
+        "saturation",
+        "hue",
+        "sharpness",
+        "power_line_frequency",
+        "auto_exposure",
+        "exposure_time_absolute",
+        "gain",
+        "zoom_absolute",
+        "white_balance_automatic",
+        "gamma",
+        "backlight_compensation",
+        "focus_automatic_continuous",
+    }
+    controls = {key: int(value) for key, value in parser.items("controls")}
+    unknown = set(controls) - allowed
+    if unknown or not controls:
+        raise ValueError(f"lens.conf 含未知项或为空：{sorted(unknown)}")
+    return controls
+
+
+def _configuration_fingerprint(
+    config_dir: Path, odin_extrinsics: Path, *, tag_csv: str | None = None
+) -> str:
+    """哈希全部几何与采集配置，阻止修改后静默复用内存窗口。"""
+    digest = hashlib.sha256()
+    paths = [config_dir / name for name in (
+        "general_settings.yaml",
+        "intrinsics.yaml",
+        "extrinsics.yaml",
+        "tag_pose.csv",
+        "camera.conf",
+        "lens.conf",
+    )]
+    paths.append(odin_extrinsics)
+    for path in paths:
+        try:
+            payload = (tag_csv.encode("utf-8")
+                       if path.name == "tag_pose.csv" and tag_csv is not None
+                       else path.read_bytes())
+        except OSError as exc:
+            raise ValueError(f"无法读取配置指纹输入 {path}: {exc}") from exc
+        digest.update(path.name.encode("utf-8") + b"\0" + payload + b"\0")
+    return digest.hexdigest()
+
+
+def load_config(config_dir: str | Path) -> ServiceConfig:
+    """一次性加载全部配置；任何歧义都在节点创建服务前失败。"""
+    root = Path(config_dir).expanduser().resolve()
+    general = _load_yaml(root / "general_settings.yaml")
+    topics = {
+        str(key): str(value)
+        for key, value in _mapping(general.get("topics"), "topics").items()
+    }
+    required_topics = {
+        "raw_odometry",
+        "corrected_odometry",
+        "camera_image",
+        "correction_status",
+        "correction_result",
+        "extnav_status",
+        "start_service",
+        "stop_service",
+        "clear_window_service",
+        "apply_saved_service",
+        "set_correction_service",
+    }
+    if set(topics) != required_topics or any(
+        not value.startswith("/") for value in topics.values()
+    ):
+        raise ValueError("topics 必须完整且全部为绝对 ROS 名称")
+
+    detection = _mapping(general.get("detection"), "detection")
+    sync = _mapping(general.get("synchronization"), "synchronization")
+    quality = _mapping(general.get("quality"), "quality")
+    keyframe = _mapping(general.get("keyframe"), "keyframe")
+    window = _mapping(general.get("window"), "window")
+    fcu_reference = _mapping(general.get("fcu_reference"), "fcu_reference")
+    timeouts = _mapping(general.get("timeouts"), "timeouts")
+    logging = _mapping(general.get("logging"), "logging")
+    tag_family = str(detection.get("tag_family", "")).strip()
+    if tag_family != "tag36h11":
+        raise ValueError("首版只允许 tag36h11")
+
+    minimum_samples = int(quality.get("minimum_samples", 0))
+    rolling_samples = int(quality.get("rolling_window_samples", 0))
+    if minimum_samples < 3 or rolling_samples < minimum_samples:
+        raise ValueError("质量窗口必须不少于 minimum_samples >= 3")
+
+    default_window_size = int(window.get("default_size", 0))
+    maximum_window_size = int(window.get("maximum_size", 0))
+    if not 2 <= default_window_size <= maximum_window_size <= 20:
+        raise ValueError("滑窗长度必须满足 2 <= default_size <= maximum_size <= 20")
+    minimum_blocks = int(keyframe.get("minimum_independent_blocks", 0))
+    if minimum_blocks < 2 or minimum_blocks > minimum_samples:
+        raise ValueError("keyframe 独立时间块数必须位于 [2, minimum_samples]")
+    baseline_ratio_error = _positive(
+        window.get("maximum_baseline_ratio_error"),
+        "maximum_baseline_ratio_error",
+    )
+    if baseline_ratio_error >= 1.0:
+        raise ValueError("maximum_baseline_ratio_error 必须小于 1")
+    minimum_effective_sigma = _positive(
+        keyframe.get("minimum_effective_sigma_m"), "minimum_effective_sigma_m"
+    )
+    maximum_effective_sigma = _positive(
+        keyframe.get("maximum_effective_sigma_m"), "maximum_effective_sigma_m"
+    )
+    if minimum_effective_sigma > maximum_effective_sigma:
+        raise ValueError("keyframe 有效 sigma 上限不得小于下限")
+    maximum_window_span = _positive(
+        window.get("maximum_window_span_seconds"), "maximum_window_span_seconds"
+    )
+    maximum_keyframe_gap = _positive(
+        window.get("maximum_keyframe_gap_seconds"), "maximum_keyframe_gap_seconds"
+    )
+    if maximum_keyframe_gap > maximum_window_span:
+        raise ValueError("相邻 keyframe 最大间隔不得超过窗口最大跨度")
+    registration_rms = _positive(
+        window.get("max_registration_rms_m"), "max_registration_rms_m"
+    )
+    registration_residual = _positive(
+        window.get("max_registration_residual_m"),
+        "max_registration_residual_m",
+    )
+    if registration_rms > registration_residual:
+        raise ValueError("配准 RMS 门限不得大于最大单点残差门限")
+    recommended_keyframes = int(window.get("recommended_precision_keyframes", 3))
+    if not 2 <= recommended_keyframes <= maximum_window_size:
+        raise ValueError("recommended_precision_keyframes 必须位于 [2, maximum_size]")
+
+    # 安装转换已在驱动完成；这里仅复用 extnav 保留的局部原点偏移 b。
+    extrinsics_value = str(fcu_reference.get("extrinsics_file", "")).strip()
+    if not extrinsics_value:
+        raise ValueError("fcu_reference.extrinsics_file 必须指定 Odin 外参配置")
+    odin_extrinsics = (root / Path(extrinsics_value).expanduser()).resolve()
+    shared_node = _mapping(
+        _load_yaml(odin_extrinsics).get("/**"),
+        "/**",
+    )
+    shared_parameters = _mapping(shared_node.get("ros__parameters"), "ros__parameters")
+    lever_arm_values = np.array([
+        _finite(shared_parameters[f"odin_{axis}"], f"odin_{axis}")
+        for axis in "xyz"
+    ])
+
+    intrinsics = _load_intrinsics(root)
+    camera = _load_camera(root)
+    if (camera.width, camera.height) != (intrinsics.width, intrinsics.height):
+        raise ValueError("camera.conf 分辨率必须与 intrinsics.yaml 完全一致")
+
+    log_path = Path(str(logging.get("directory", "../log"))).expanduser()
+    if not log_path.is_absolute():
+        log_path = (root / log_path).resolve()
+
+    return ServiceConfig(
+        config_dir=root,
+        interface_version=str(general.get("interface_version", "")).strip(),
+        config_fingerprint=_configuration_fingerprint(root, odin_extrinsics),
+        topics=topics,
+        intrinsics=intrinsics,
+        t_fcu_camera=_load_extrinsics(root),
+        tags=_load_tags(root),
+        camera=camera,
+        lens_controls=_load_lens(root),
+        detection=DetectionSettings(
+            tag_family=tag_family,
+            processing_rate_hz=_positive(
+                detection.get("processing_rate_hz"), "processing_rate_hz"
+            ),
+            image_scale=_positive(detection.get("image_scale"), "image_scale"),
+            corner_refinement=bool(detection.get("corner_refinement", True)),
+            max_reprojection_error_px=_positive(
+                detection.get("max_reprojection_error_px"), "max_reprojection_error_px"
+            ),
+            max_correction_tilt_deg=_positive(
+                detection.get("max_correction_tilt_deg"), "max_correction_tilt_deg"
+            ),
+            reject_multiple_tags=bool(detection.get("reject_multiple_tags", True)),
+        ),
+        synchronization=SynchronizationSettings(
+            odometry_history_seconds=_positive(
+                sync.get("odometry_history_seconds"), "odometry_history_seconds"
+            ),
+            max_header_delta_ms=_positive(
+                sync.get("max_header_delta_ms"), "max_header_delta_ms"
+            ),
+            max_arrival_delta_ms=_positive(
+                sync.get("max_arrival_delta_ms"), "max_arrival_delta_ms"
+            ),
+            header_epoch_tolerance_seconds=_positive(
+                sync.get("header_epoch_tolerance_seconds"),
+                "header_epoch_tolerance_seconds",
+            ),
+        ),
+        quality=QualitySettings(
+            minimum_samples=minimum_samples,
+            rolling_window_samples=rolling_samples,
+            minimum_span_seconds=_positive(
+                quality.get("minimum_span_seconds"), "minimum_span_seconds"
+            ),
+            max_position_std_m=_positive(
+                quality.get("max_position_std_m"), "max_position_std_m"
+            ),
+            max_yaw_std_rad=math.radians(
+                _positive(quality.get("max_yaw_std_deg"), "max_yaw_std_deg")
+            ),
+            max_position_range_m=_positive(
+                quality.get("max_position_range_m"), "max_position_range_m"
+            ),
+            max_yaw_range_rad=math.radians(
+                _positive(quality.get("max_yaw_range_deg"), "max_yaw_range_deg")
+            ),
+            divergence_position_range_m=_positive(
+                quality.get("divergence_position_range_m"),
+                "divergence_position_range_m",
+            ),
+            divergence_yaw_range_rad=math.radians(
+                _positive(
+                    quality.get("divergence_yaw_range_deg"), "divergence_yaw_range_deg"
+                )
+            ),
+            mad_outlier_scale=_positive(
+                quality.get("mad_outlier_scale"), "mad_outlier_scale"
+            ),
+        ),
+        keyframe=KeyframeSettings(
+            correlation_block_seconds=_positive(
+                keyframe.get("correlation_block_seconds"),
+                "correlation_block_seconds",
+            ),
+            minimum_independent_blocks=minimum_blocks,
+            odin_position_noise_floor_m=_positive(
+                keyframe.get("odin_position_noise_floor_m"),
+                "odin_position_noise_floor_m",
+            ),
+            tag_world_sigma_m=_positive(
+                keyframe.get("tag_world_sigma_m"), "tag_world_sigma_m"
+            ),
+            extrinsic_sigma_m=_positive(
+                keyframe.get("extrinsic_sigma_m"), "extrinsic_sigma_m"
+            ),
+            minimum_effective_sigma_m=_positive(
+                minimum_effective_sigma,
+                "minimum_effective_sigma_m",
+            ),
+            maximum_effective_sigma_m=_positive(
+                maximum_effective_sigma,
+                "maximum_effective_sigma_m",
+            ),
+            max_sync_motion_error_m=_positive(
+                keyframe.get("max_sync_motion_error_m"),
+                "max_sync_motion_error_m",
+            ),
+        ),
+        window=WindowSettings(
+            default_size=default_window_size,
+            maximum_size=maximum_window_size,
+            minimum_baseline_m=_positive(
+                window.get("minimum_baseline_m"), "minimum_baseline_m"
+            ),
+            maximum_baseline_ratio_error=baseline_ratio_error,
+            maximum_window_span_seconds=maximum_window_span,
+            maximum_keyframe_gap_seconds=maximum_keyframe_gap,
+            candidate_max_age_seconds=_positive(
+                window.get("candidate_max_age_seconds"),
+                "candidate_max_age_seconds",
+            ),
+            max_registration_rms_m=registration_rms,
+            max_registration_residual_m=registration_residual,
+            max_model_yaw_std_rad=math.radians(
+                _positive(
+                    window.get("max_model_yaw_std_deg"),
+                    "max_model_yaw_std_deg",
+                )
+            ),
+            max_prior_model_residual_m=_positive(
+                window.get("max_prior_model_residual_m"),
+                "max_prior_model_residual_m",
+            ),
+            max_apply_position_jump_m=_positive(
+                window.get("max_apply_position_jump_m"),
+                "max_apply_position_jump_m",
+            ),
+            max_apply_yaw_jump_rad=math.radians(
+                _positive(
+                    window.get("max_apply_yaw_jump_deg"),
+                    "max_apply_yaw_jump_deg",
+                )
+            ),
+            recommended_precision_keyframes=recommended_keyframes,
+        ),
+        fcu_reference=FcuReferenceSettings(
+            lever_arm_m=lever_arm_values,
+            parameter_tolerance=_positive(
+                fcu_reference.get("parameter_tolerance"), "parameter_tolerance"
+            ),
+        ),
+        timeouts=TimeoutSettings(
+            camera_start_seconds=_positive(
+                timeouts.get("camera_start_seconds"), "camera_start_seconds"
+            ),
+            first_tag_seconds=_positive(
+                timeouts.get("first_tag_seconds"), "first_tag_seconds"
+            ),
+            extnav_apply_seconds=_positive(
+                timeouts.get("extnav_apply_seconds"), "extnav_apply_seconds"
+            ),
+            extnav_reconcile_seconds=_positive(
+                timeouts.get("extnav_reconcile_seconds"),
+                "extnav_reconcile_seconds",
+            ),
+            ground_max_runtime_seconds=_positive(
+                timeouts.get("ground_max_runtime_seconds", 0.0),
+                "ground_max_runtime_seconds",
+                allow_zero=True,
+            ),
+        ),
+        logging=LoggingSettings(
+            directory=log_path,
+            service_log_max_bytes=int(
+                _positive(logging.get("service_log_max_bytes"), "service_log_max_bytes")
+            ),
+            service_log_backups=int(
+                _positive(logging.get("service_log_backups"), "service_log_backups")
+            ),
+            sample_summary_period_seconds=_positive(
+                logging.get("sample_summary_period_seconds"),
+                "sample_summary_period_seconds",
+            ),
+        ),
+    )

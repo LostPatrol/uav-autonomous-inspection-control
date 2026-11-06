@@ -1,0 +1,1059 @@
+"""odom/map 航点坐标、巡检/校准属性编辑、排序、进度与上传面板。"""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+from typing import ClassVar
+
+from PySide6.QtCore import QRegularExpression, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QIcon,
+    QRegularExpressionValidator,
+)
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QAbstractSpinBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QStyledItemDelegate,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..config import (
+    WAYPOINT_HORIZONTAL_LIMIT_METERS,
+    WAYPOINT_YAW_LIMIT_DEGREES,
+    WAYPOINT_Z_MAX_METERS,
+    WAYPOINT_Z_MIN_METERS,
+)
+from ..models import (
+    AvoidanceBackendSnapshot,
+    FlightMode,
+    VehicleSnapshot,
+    WaypointFlightStrategy,
+    WaypointReferenceGenerator,
+    WaypointTrackingController,
+)
+from ..waypoint_io import Waypoint, WaypointCollection
+from .state import UiAvailability
+from .theme import COLORS
+from .widgets import (
+    Card,
+    DownwardComboBox,
+    NoWheelDoubleSpinBox,
+    set_text_if_changed,
+    set_tooltip_if_changed,
+)
+
+
+class WaypointDropTable(QTableWidget):
+    """接收一个或多个本地文件路径，由主窗口统一校验并导入。"""
+
+    files_dropped = Signal(object)
+
+    def __init__(self, rows: int, columns: int) -> None:
+        """启用只接收外部文件的拖放模式，不允许表格内部移动。"""
+        super().__init__(rows, columns)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+
+    @staticmethod
+    def _has_local_files(event: QDragEnterEvent | QDragMoveEvent) -> bool:
+        """仅接受带至少一个本地文件 URL 的拖放载荷。"""
+        urls = event.mimeData().urls()
+        return bool(urls) and all(url.isLocalFile() for url in urls)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        """允许资源管理器中的本地文件进入航点列表。"""
+        if self._has_local_files(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802
+        """拖动期间持续显示当前载荷可放置。"""
+        if self._has_local_files(event):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        """把全部本地路径交给主窗口，以便明确拒绝多文件导入。"""
+        paths = tuple(
+            url.toLocalFile()
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        )
+        if not paths:
+            event.ignore()
+            return
+        self.files_dropped.emit(paths)
+        event.acceptProposedAction()
+
+
+class WaypointCoordinateDelegate(QStyledItemDelegate):
+    """复用顶部输入约束，在单元格编辑期间即时更新本地航点。"""
+
+    def __init__(self, panel: WaypointPanel) -> None:
+        """将数值编辑器绑定到面板唯一的航点列表。"""
+        super().__init__(panel.table)
+        self._panel = panel
+
+    def createEditor(self, parent, option, index):  # noqa: N802
+        """为坐标或角度创建支持键入即时更新的数值输入框。"""
+        source = (
+            self._panel.x_input, self._panel.y_input,
+            self._panel.z_input, self._panel.yaw_input,
+        )[index.column() - 1]
+        editor = NoWheelDoubleSpinBox(parent)
+        editor.setDecimals(source.decimals())
+        editor.setRange(source.minimum(), source.maximum())
+        editor.setSingleStep(source.singleStep())
+        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        editor.setFrame(False)
+        editor.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        # 普通输入框主题的最小高度、内边距和焦点边框会撑大表格编辑器。
+        editor.setStyleSheet(
+            "QDoubleSpinBox, QDoubleSpinBox:focus, QLineEdit, QLineEdit:focus {"
+            " min-height: 0; padding: 0; border: none; border-radius: 0; }"
+        )
+        editor.setKeyboardTracking(True)
+        editor.valueChanged.connect(
+            lambda value: self._panel._edit_waypoint(index.row(), index.column(), value)
+        )
+        return editor
+
+    def setEditorData(self, editor, index) -> None:  # noqa: N802
+        """载入原始值；实时刷新同值时保留用户正在键入的文本与光标。"""
+        value = self._panel.waypoints[index.row()][index.column() - 1]
+        if index.column() == 4:
+            value = math.degrees(value)
+        value = round(value, editor.decimals())
+        if editor.value() != value:
+            with QSignalBlocker(editor):
+                editor.setValue(value)
+
+    def setModelData(self, editor, model, index) -> None:  # noqa: N802
+        """数值变化已即时写回；退出编辑时不再提交，避免未修改值被取整。"""
+        pass
+
+
+class WaypointTagDelegate(QStyledItemDelegate):
+    """用非负整数文本编辑 Tag ID，避免数值控件的上限截断导入值。"""
+
+    def __init__(self, panel: WaypointPanel) -> None:
+        """绑定面板，沿用实时编辑与预览通知链。"""
+        super().__init__(panel.table)
+        self._panel = panel
+
+    def createEditor(self, parent, option, index):
+        """只接受十进制数字；清空输入时先保留原 ID，等待继续键入。"""
+        editor = QLineEdit(parent)
+        editor.setValidator(QRegularExpressionValidator(QRegularExpression("[0-9]+"), editor))
+        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        editor.setFrame(False)
+        editor.setStyleSheet(
+            "QLineEdit, QLineEdit:focus { min-height: 0; padding: 0;"
+            " border: none; border-radius: 0; }"
+        )
+        editor.textEdited.connect(
+            lambda text: self._panel._edit_waypoint_attribute(
+                index.row(), "calibration_tag_id", int(text)
+            ) if editor.hasAcceptableInput() else None
+        )
+        return editor
+
+    def setEditorData(self, editor, index) -> None:
+        """读取完整整数，不用显示宽度或控件范围截断原值。"""
+        value = self._panel.waypoints[index.row()].calibration_tag_id
+        if not editor.hasAcceptableInput() or int(editor.text()) != value:
+            with QSignalBlocker(editor):
+                editor.setText(str(value))
+
+    def setModelData(self, editor, model, index) -> None:
+        """实时信号已写回；未完成的空输入不覆盖原有效值。"""
+        return None
+
+
+class WaypointPanel(QWidget):
+    """维护尚未上传的本地航点副本，并把最终列表作为单一信号发出。"""
+
+    # 顶部输入、表头和航点行共用的紧凑高度，单位为像素。
+    _ROW_HEIGHT = 28
+
+    # 三个复选框所在表格列与具名字段一一对应；第 7 列单独编辑 Tag ID。
+    _BOOLEAN_FIELDS: ClassVar[dict[int, str]] = {5: "is_inspection", 6: "is_calibration", 8: "continue_window"}
+    # 复用工程主题区分普通、巡检、校准与双标志；文字说明同时保留。
+    _TYPE_STYLES: ClassVar[dict[tuple[bool, bool], tuple[str, str, str]]] = {
+        (False, False): ("普通航点", "muted", "surface"),
+        (True, False): ("巡检航点", "success", "success_soft"),
+        (False, True): ("校准航点", "warning", "warning_soft"),
+        (True, True): ("巡检 + 校准航点", "accent", "warning_soft"),
+    }
+
+    # 参数依次为航点、飞行策略、命令生成方式和跟踪控制方式。
+    send_requested = Signal(object, object, object, object)
+    clear_requested = Signal()
+    preview_requested = Signal()
+    import_file_requested = Signal()
+    export_file_requested = Signal()
+    files_dropped = Signal(object)
+    waypoints_changed = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """构建数值输入、航点表、排序按钮和执行进度。"""
+        super().__init__(parent)
+        self.setMinimumWidth(480)
+        self.setMinimumHeight(500)
+        self._waypoints: list[Waypoint] = []
+        self._result_message = ""
+        self._progress_completed = False
+        self._editing_enabled = True
+        self._configuration_enabled = False
+        self._locked_configuration = False
+        self._current_pose: tuple[float, float, float, float] | None = None
+        self._preview_enabled = False
+        self._progress_tracking = False
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 0, 0, 0)
+        root.setSpacing(10)
+        # 上方编辑卡吃掉多余高度；下方执行卡贴底，高度固定。
+        root.addWidget(self._build_editor_card(), 1)
+        root.addWidget(self._build_execution_card(), 0)
+
+    def _build_editor_card(self) -> Card:
+        """创建航点输入与可伸缩表格：仅中间列表随面板高度变长。"""
+        card = Card(
+            "航点任务",
+            "坐标按当前 odom/map 任务系解释；新点默认普通。\n"
+            "巡检与校准可同时勾选；沿窗仅校准点使用，首个校准点忽略。",
+        )
+        self.editor_card = card
+        card.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
+        # 标签与输入同排：X [框] Y [框] Z [框] Yaw [框]，压缩顶部高度留给列表。
+        coords = QHBoxLayout()
+        coords.setSpacing(3)
+        self.x_input = self._coordinate_input(
+            -WAYPOINT_HORIZONTAL_LIMIT_METERS,
+            WAYPOINT_HORIZONTAL_LIMIT_METERS,
+            2,
+            " m",
+        )
+        self.y_input = self._coordinate_input(
+            -WAYPOINT_HORIZONTAL_LIMIT_METERS,
+            WAYPOINT_HORIZONTAL_LIMIT_METERS,
+            2,
+            " m",
+        )
+        self.z_input = self._coordinate_input(
+            WAYPOINT_Z_MIN_METERS, WAYPOINT_Z_MAX_METERS, 2, " m"
+        )
+        self.yaw_input = self._coordinate_input(
+            -WAYPOINT_YAW_LIMIT_DEGREES,
+            WAYPOINT_YAW_LIMIT_DEGREES,
+            1,
+            " °",
+        )
+        self.z_input.setValue(1.0)
+        for text, control in (
+            ("X", self.x_input),
+            ("Y", self.y_input),
+            ("Z", self.z_input),
+            ("Yaw", self.yaw_input),
+        ):
+            label = QLabel(text)
+            label.setObjectName("mutedLabel")
+            label.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            coords.addWidget(label, 0)
+            coords.addWidget(control, 1)
+        self.add_button = self._button("+", "neutral", "addWaypointButton")
+        self.add_button.setProperty("compact", True)
+        self.add_button.setFixedSize(self._ROW_HEIGHT, self._ROW_HEIGHT)
+        self.add_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self.add_button.setToolTip("将当前 X、Y、Z、Yaw 追加到航点列表")
+        self.add_button.setProperty("baseToolTip", self.add_button.toolTip())
+        self.add_button.clicked.connect(self._add_waypoint)
+        coords.addWidget(self.add_button, 0)
+        self.add_current_button = self._icon_button(
+            QIcon(str(Path(__file__).resolve().parent / "assets" / "current-location.svg")),
+            "添加飞机当前实际位姿到航点列表末尾",
+            "addCurrentWaypointButton",
+        )
+        self.add_current_button.setProperty("compact", True)
+        self.add_current_button.setFixedSize(self._ROW_HEIGHT, self._ROW_HEIGHT)
+        self.add_current_button.clicked.connect(self._add_current_waypoint)
+        coords.addWidget(self.add_current_button, 0)
+        # stretch=0：坐标与添加操作固定为单行，把纵向空间留给表格。
+        card.content_layout.addLayout(coords, 0)
+
+        self.table = WaypointDropTable(0, 9)
+        self.table.setObjectName("waypointTable")
+        self.table.setHorizontalHeaderLabels(
+            ("#", "X / m", "Y / m", "Z / m", "Yaw / °", "巡检", "校准", "Tag ID", "沿窗")
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+        )
+        coordinate_delegate = WaypointCoordinateDelegate(self)
+        for column in range(1, 5):
+            self.table.setItemDelegateForColumn(column, coordinate_delegate)
+        self.table.setItemDelegateForColumn(7, WaypointTagDelegate(self))
+        self.table.setMinimumHeight(95)
+        self.table.setToolTip(
+            "双击坐标或非负 Tag ID 编辑，单击复选框切换属性；"
+            "巡检抓拍上报、校准执行 Tag 修正，两者可同时勾选；支持拖入 CSV 文件"
+        )
+        self.table.setProperty("baseToolTip", self.table.toolTip())
+        self.table.setAccessibleDescription(
+            "当前 odom/map 航点列表；可独立勾选巡检、校准和沿窗；"
+            "双击数值即时修改；支持拖入一个 CSV 文件并在确认后替换列表"
+        )
+        # 取消固定最大高度，使中间列表成为唯一纵向伸缩区。
+        self.table.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        vertical_header = self.table.verticalHeader()
+        vertical_header.setVisible(False)
+        vertical_header.setMinimumSectionSize(self._ROW_HEIGHT)
+        vertical_header.setDefaultSectionSize(self._ROW_HEIGHT)
+        header = self.table.horizontalHeader()
+        header.setFixedHeight(self._ROW_HEIGHT)
+        header.setMinimumSectionSize(42)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for column in range(1, 5):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        for column in range(5, 9):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeaderItem(5).setToolTip("勾选后到点抓拍并上报巡检消息")
+        self.table.horizontalHeaderItem(6).setToolTip("勾选后到点执行 Tag 校准；不影响巡检标志")
+        self.table.horizontalHeaderItem(7).setToolTip("校准 Tag ID，非负整数；仅校准点执行时使用")
+        self.table.horizontalHeaderItem(8).setToolTip("校准时沿用历史滑窗；本任务首个校准点忽略此项")
+        self.table.itemChanged.connect(self._waypoint_item_changed)
+        self.table.itemSelectionChanged.connect(self._update_local_controls)
+        self.table.files_dropped.connect(self.files_dropped.emit)
+        card.content_layout.addWidget(self.table, 1)
+
+        controls = QHBoxLayout()
+        # 七个紧凑操作在面板最小宽度下也需完整显示文字；多余宽度仍由中间 stretch 吸收。
+        controls.setSpacing(2)
+        assets = Path(__file__).resolve().parent / "assets"
+        self.up_button = self._icon_button(
+            QIcon(str(assets / "chevron-up.svg")),
+            "上移选中航点",
+            "moveWaypointUpButton",
+        )
+        self.down_button = self._icon_button(
+            QIcon(str(assets / "chevron-down.svg")),
+            "下移选中航点",
+            "moveWaypointDownButton",
+        )
+        self.remove_button = self._icon_button(
+            QIcon(str(assets / "minus-red.svg")),
+            "删除选中航点",
+            "removeWaypointButton",
+        )
+        self.clear_button = self._button("清空", "danger", "clearWaypointButton")
+        self.clear_button.setToolTip("清空全部本地航点")
+        self.clear_button.setProperty("baseToolTip", self.clear_button.toolTip())
+        self.remove_button.clicked.connect(self._remove_selected)
+        self.up_button.clicked.connect(lambda: self._move_selected(-1))
+        self.down_button.clicked.connect(lambda: self._move_selected(1))
+        self.clear_button.clicked.connect(self.clear_requested)
+        for button in (
+            self.up_button,
+            self.down_button,
+            self.remove_button,
+            self.clear_button,
+        ):
+            button.setProperty("compact", True)
+            controls.addWidget(button)
+        controls.addStretch(1)
+        self.preview_button = self._button(
+            "预览", "neutral", "previewWaypointButton"
+        )
+        self.preview_button.setProperty("compact", True)
+        self.preview_button.setToolTip(
+            "在 RViz 中显示当前航点、航点间直线和无人机实时位姿"
+        )
+        self.preview_button.setProperty(
+            "baseToolTip", self.preview_button.toolTip()
+        )
+        self.preview_button.setAccessibleName("在 RViz 中预览航点")
+        self.preview_button.clicked.connect(self.preview_requested)
+        controls.addWidget(self.preview_button)
+        self.import_button = self._button(
+            "从文件导入", "neutral", "importWaypointButton"
+        )
+        self.import_button.setProperty("compact", True)
+        self.import_button.setToolTip(
+            "从单个 CSV 文件导入当前 odom/map 任务坐标系航点，并替换当前列表"
+        )
+        self.import_button.setProperty("baseToolTip", self.import_button.toolTip())
+        self.import_button.setAccessibleName("从文件导入航点")
+        self.import_button.clicked.connect(self.import_file_requested)
+        controls.addWidget(self.import_button)
+        self.export_button = self._button(
+            "导出到文件", "neutral", "exportWaypointButton"
+        )
+        self.export_button.setProperty("compact", True)
+        self.export_button.setToolTip(
+            "将当前坐标及巡检、校准、Tag ID、沿窗属性完整导出为 CSV 文件"
+        )
+        self.export_button.setProperty("baseToolTip", self.export_button.toolTip())
+        self.export_button.setAccessibleName("导出当前航点列表到文件")
+        self.export_button.clicked.connect(self.export_file_requested)
+        controls.addWidget(self.export_button)
+        # stretch=0：排序/清空条贴在表格下方、随卡片但不抢高度。
+        card.content_layout.addLayout(controls, 0)
+
+        # Card 外层默认不给 content 伸缩；仅本卡让 content 吃掉多余高度。
+        card_root = card.layout()
+        if isinstance(card_root, QVBoxLayout):
+            for index in range(card_root.count()):
+                item = card_root.itemAt(index)
+                if item is not None and item.layout() is card.content_layout:
+                    card_root.setStretch(index, 1)
+                    break
+
+        self._update_local_controls()
+        return card
+
+    def _build_execution_card(self) -> Card:
+        """创建无标题的紧凑进度、发送与三项实验配置区。"""
+        card = Card("")
+        card.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        self.progress = QProgressBar()
+        self.progress.setObjectName("waypointProgress")
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat("尚未执行")
+        self.send_button = self._button(
+            "发送并执行航点", "primary", "sendWaypointButton"
+        )
+        self.send_button.clicked.connect(self._emit_send_requested)
+        action_row.addWidget(self.progress, 2)
+        action_row.addWidget(self.send_button, 1)
+        card.content_layout.addLayout(action_row)
+        # 平时隐藏说明行；校准进度与可靠拒绝/失败结果必须在执行卡内可见。
+        self.status_label = QLabel("请先编辑航点，再在飞行器就绪后发送。", card)
+        self.status_label.setObjectName("mutedLabel")
+        self.status_label.setWordWrap(True)
+        card.content_layout.addWidget(self.status_label)
+        self.status_label.hide()
+
+        # 三列只负责选择；飞行中由状态门控统一锁定，任务内部不做热切换。
+        selection_row = QHBoxLayout()
+        selection_row.setSpacing(8)
+        self.strategy_combo = DownwardComboBox()
+        self.strategy_combo.setObjectName("waypointStrategyCombo")
+        self.strategy_combo.setToolTip(
+            "起飞前锁定策略；避障无法规划或遇障时制动等待，超时原地降落。"
+        )
+        self.strategy_combo.setProperty("baseToolTip", self.strategy_combo.toolTip())
+        for strategy in WaypointFlightStrategy:
+            self.strategy_combo.addItem(strategy.label, strategy)
+        self.strategy_combo.setCurrentIndex(0)
+
+        self.reference_combo = DownwardComboBox()
+        self.reference_combo.setObjectName("waypointReferenceGeneratorCombo")
+        self.reference_combo.setToolTip(
+            "选择航点到连续位置/速度/加速度参考的生成方式；参数位于 control.yaml。"
+        )
+        self.reference_combo.setProperty("baseToolTip", self.reference_combo.toolTip())
+        for generator in WaypointReferenceGenerator:
+            if generator is WaypointReferenceGenerator.PLANNER_TRAJECTORY:
+                continue  # 规划轨迹只用于实际回读，输入仍保留四种原有生成器。
+            self.reference_combo.addItem(generator.label, generator)
+        # GUI 默认使用当前推荐的连续梯形速度参考；协议的未知值回退仍保留基线。
+        self.reference_combo.setCurrentIndex(
+            WaypointReferenceGenerator.TRAPEZOIDAL_PROFILE.value
+        )
+
+        self.tracking_combo = DownwardComboBox()
+        self.tracking_combo.setObjectName("waypointTrackingControllerCombo")
+        self.tracking_combo.setToolTip(
+            "位置 PD+DOB 保留基线；轨迹 PD+DOB 使用独立低带宽增益和加速度前馈。"
+        )
+        self.tracking_combo.setProperty("baseToolTip", self.tracking_combo.toolTip())
+        for controller in WaypointTrackingController:
+            self.tracking_combo.addItem(controller.label, controller)
+        self.tracking_combo.setCurrentIndex(
+            WaypointTrackingController.TRAJECTORY_PD_DOB.value
+        )
+
+        for label_text, combo in (
+            ("避障策略", self.strategy_combo),
+            ("命令生成", self.reference_combo),
+            ("跟踪控制", self.tracking_combo),
+        ):
+            field = QVBoxLayout()
+            field.setSpacing(4)
+            label = QLabel(label_text)
+            label.setObjectName("waypointMethodLabel")
+            label.setBuddy(combo)
+            combo.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            combo.setMinimumWidth(0)
+            field.addWidget(label)
+            field.addWidget(combo)
+            selection_row.addLayout(field, 1)
+        card.content_layout.addLayout(selection_row)
+        backend_row = QHBoxLayout()
+        backend_row.setSpacing(8)
+        backend_row.addWidget(QLabel("规划后端"))
+        self.backend_combo = DownwardComboBox()
+        self.backend_combo.setObjectName("avoidanceBackendCombo")
+        self.backend_combo.addItem("CPU", "cpu")
+        self.backend_combo.addItem("FPGA 加速", "fpga")
+        self.backend_combo.model().item(1).setEnabled(False)
+        self.backend_combo.setEnabled(False)
+        backend_row.addWidget(self.backend_combo)
+        self.backend_status_label = QLabel("CPU 默认 · 可选模块未连接")
+        self.backend_status_label.setObjectName("mutedLabel")
+        self.backend_status_label.setWordWrap(True)
+        backend_row.addWidget(self.backend_status_label, 1)
+        card.content_layout.addLayout(backend_row)
+        self.strategy_combo.currentIndexChanged.connect(self._apply_strategy_constraints)
+        return card
+
+    def update_backend(
+        self, backend: AvoidanceBackendSnapshot, *, can_switch: bool, switching: str | None,
+    ) -> None:
+        """只投影管理器实际后端，独立展示硬件、CPU 回退和 MOCK 来源。"""
+        self.backend_combo.blockSignals(True)
+        self.backend_combo.setCurrentIndex(1 if backend.backend == "fpga" else 0)
+        self.backend_combo.blockSignals(False)
+        self.backend_combo.model().item(1).setEnabled(
+            backend.manager_available and backend.available
+        )
+        self.backend_combo.setEnabled(can_switch)
+        if not backend.manager_available:
+            detail = (
+                f"{backend.backend.upper()} 最后选择 · 状态未知"
+                if backend.backend == "fpga" or math.isfinite(backend.age_seconds)
+                else "CPU 默认 · 可选管理器不可用"
+            )
+        else:
+            source = backend.source.strip() or "尚无求解结果"
+            if "mock" in source.lower():
+                source = f"MOCK 模拟 ({source})"
+            elif backend.backend == "fpga" and ("cpu" in source.lower() or source.lower() in {"direct", "deterministic"}):
+                source = f"CPU 回退 ({source})"
+            detail = f"{backend.backend.upper()} 模式 · {'就绪' if backend.ready else '未就绪'} · 来源 {source}"
+        if backend.error and (backend.manager_available or math.isfinite(backend.age_seconds)):
+            detail += f" · {backend.error}"
+        if switching:
+            detail = f"正在切换 {switching.upper()}… · 当前 {backend.backend.upper()}"
+        set_text_if_changed(self.backend_status_label, detail)
+        tip = backend.error
+        if backend.manager_available:
+            tip = (f"机载实际后端：{backend.backend.upper()}；实际求解来源：{backend.source or '尚无结果'}。\n"
+                   "仅落地、未解锁且无任务时可切换；FPGA 板卡在主动切换时检测。\n" + tip)
+        set_tooltip_if_changed(self.backend_combo, tip)
+        set_tooltip_if_changed(self.backend_status_label, tip)
+
+    def _apply_strategy_constraints(self) -> None:
+        """明确显示规划轨迹语义，并约束避障使用连续参考及轨迹跟踪。"""
+        strategy = self.selected_strategy()
+        automatic = strategy is WaypointFlightStrategy.AVOID
+        obstacle = strategy is not WaypointFlightStrategy.STRAIGHT
+        if not self._locked_configuration and (
+                automatic or (obstacle and self.selected_reference_generator()
+                              is WaypointReferenceGenerator.STEP_POSITION)):
+            # 自动避障的输入值 2 仍供机载原有 yaw 管理；实际 xyz 由规划器接管。
+            self.reference_combo.setCurrentIndex(
+                WaypointReferenceGenerator.TRAPEZOIDAL_PROFILE.value
+            )
+        if obstacle and not self._locked_configuration:
+            self.tracking_combo.setCurrentIndex(
+                WaypointTrackingController.TRAJECTORY_PD_DOB.value
+            )
+        for generator in WaypointReferenceGenerator:
+            if generator is not WaypointReferenceGenerator.PLANNER_TRAJECTORY:
+                self.reference_combo.setItemText(generator.value, (
+                    "规划器带时间轨迹"
+                    if automatic and generator == self.selected_reference_generator()
+                    else generator.label
+                ))
+        step_item = self.reference_combo.model().item(0)
+        step_item.setEnabled(not obstacle)
+        self.reference_combo.setEnabled(self._configuration_enabled and not automatic)
+        self.tracking_combo.setEnabled(self._configuration_enabled and not obstacle)
+        if obstacle:
+            set_tooltip_if_changed(self.tracking_combo, "避障固定使用轨迹 PD+DOB，起飞后锁定配置。")
+        if automatic:
+            set_tooltip_if_changed(self.reference_combo, "直接执行规划器带时间轨迹；保留梯形参考参数管理偏航。")
+
+    def selected_strategy(self) -> WaypointFlightStrategy:
+        """返回当前下拉框选中的航点飞行策略。"""
+        data = self.strategy_combo.currentData()
+        if isinstance(data, WaypointFlightStrategy):
+            return data
+        return WaypointFlightStrategy.from_value(data)
+
+    def selected_reference_generator(self) -> WaypointReferenceGenerator:
+        """返回解除武装阶段选定的航点命令生成方式。"""
+        data = self.reference_combo.currentData()
+        if isinstance(data, WaypointReferenceGenerator):
+            return data
+        return WaypointReferenceGenerator.from_value(data)
+
+    def selected_tracking_controller(self) -> WaypointTrackingController:
+        """返回解除武装阶段选定的航点跟踪控制方式。"""
+        data = self.tracking_combo.currentData()
+        if isinstance(data, WaypointTrackingController):
+            return data
+        return WaypointTrackingController.from_value(data)
+
+    def _emit_send_requested(self) -> None:
+        """原子发出航点和飞行前锁定的三项选择。"""
+        self.send_requested.emit(
+            tuple(self._waypoints),
+            self.selected_strategy(),
+            self.selected_reference_generator(),
+            self.selected_tracking_controller(),
+        )
+
+    @staticmethod
+    def _coordinate_input(
+        minimum: float, maximum: float, decimals: int, suffix: str
+    ) -> NoWheelDoubleSpinBox:
+        """创建带窄型步进箭头和可见单位的紧凑航点输入。"""
+        control = NoWheelDoubleSpinBox()
+        control.setRange(minimum, maximum)
+        control.setDecimals(decimals)
+        control.setSingleStep(0.1)
+        control.setProperty("compactValueInput", True)
+        control.setSuffix(suffix.strip())
+        control.setToolTip(f"输入值单位：{suffix.strip()}")
+        control.setProperty("baseToolTip", control.toolTip())
+        control.setKeyboardTracking(False)
+        control.setProperty("waypointCoordinate", True)
+        control.setFixedHeight(WaypointPanel._ROW_HEIGHT)
+        control.setMinimumWidth(58)
+        control.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        return control
+
+    @staticmethod
+    def _button(text: str, role: str, object_name: str) -> QPushButton:
+        """创建带稳定对象名的航点操作按钮。"""
+        button = QPushButton(text)
+        button.setObjectName(object_name)
+        button.setProperty("role", role)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        return button
+
+    @classmethod
+    def _icon_button(
+        cls, icon: QIcon, tooltip: str, object_name: str
+    ) -> QPushButton:
+        """创建只显示图标、但保留无障碍名称和明确提示的表格操作按钮。"""
+        button = cls._button("", "neutral", object_name)
+        button.setIcon(icon)
+        button.setIconSize(QSize(16, 16))
+        button.setFixedSize(32, cls._ROW_HEIGHT)
+        button.setToolTip(tooltip)
+        button.setProperty("baseToolTip", tooltip)
+        button.setAccessibleName(tooltip)
+        return button
+
+    @property
+    def waypoints(self) -> WaypointCollection:
+        """返回待上传航点的不可变副本。"""
+        return tuple(self._waypoints)
+
+    def _add_waypoint(self) -> None:
+        """读取已约束数值并追加一个弧度偏航航点。"""
+        waypoint = Waypoint(
+            self.x_input.value(),
+            self.y_input.value(),
+            self.z_input.value(),
+            math.radians(self.yaw_input.value()),
+        )
+        self._append_waypoint(waypoint)
+
+    def update_current_pose(self, snapshot: VehicleSnapshot) -> None:
+        """缓存与主 GUI 实际位姿同一帧的原始 ENU 坐标和弧度偏航。"""
+        set_text_if_changed(self.editor_card.title_label, f"航点任务 · {snapshot.navigation_frame}")
+        pose = snapshot.task_pose
+        set_tooltip_if_changed(self.add_current_button, f"采集 {snapshot.navigation_frame} 坐标系当前位置")
+        self._current_pose = (
+            pose if snapshot.onboard_available and snapshot.connected
+            and snapshot.local_position_valid and snapshot.navigation_ready
+            and all(math.isfinite(v) for v in pose)
+            else None
+        )
+        self.add_current_button.setEnabled(
+            self._editing_enabled and self._current_pose is not None
+        )
+
+    def _add_current_waypoint(self) -> None:
+        """只追加已显示的实际位姿，不经过输入框取整或限幅。"""
+        if self._editing_enabled and self._current_pose is not None:
+            self._append_waypoint(self._current_pose)
+
+    def _append_waypoint(self, waypoint: Waypoint | tuple[float, float, float, float]) -> None:
+        """统一追加、选中末行并通知日志与预览刷新。"""
+        self._waypoints.append(Waypoint(*waypoint))
+        self._refresh_table(len(self._waypoints) - 1)
+        self.status_label.setText(f"本地列表包含 {len(self._waypoints)} 个航点，尚未上传。")
+        self.waypoints_changed.emit(f"已添加航点 #{len(self._waypoints)}")
+
+    def _edit_waypoint(self, row: int, column: int, value: float) -> None:
+        """只修改目标分量并复用现有通知，让预览与待上传副本即时一致。"""
+        if (not self._editing_enabled or not 0 <= row < len(self._waypoints)
+                or column not in range(1, 5)):
+            return
+        waypoint = self._waypoints[row]
+        coordinate = math.radians(value) if column == 4 else value
+        previous = math.degrees(waypoint[3]) if column == 4 else waypoint[column - 1]
+        # Qt 在回车时也会发出同值信号；保留未实际修改的采点/导入精度。
+        if round(previous, 1 if column == 4 else 2) == value:
+            return
+        # 用具名替换保留类型及巡检/校准属性，不能退回四元组或普通 tuple。
+        self._waypoints[row] = waypoint._replace(**{Waypoint._fields[column - 1]: coordinate})
+        self.table.item(row, column).setText(
+            f"{value:+.1f}" if column == 4 else f"{value:+.2f}"
+        )
+        self.status_label.setText(f"已修改本地航点 #{row + 1}，尚未上传。")
+        self.waypoints_changed.emit(f"已修改航点 #{row + 1} 的 {('X', 'Y', 'Z', 'Yaw')[column - 1]}")
+
+    def _waypoint_item_changed(self, item: QTableWidgetItem) -> None:
+        """复选框变化只修改对应布尔字段；刷新与数值编辑不走此分支。"""
+        field = self._BOOLEAN_FIELDS.get(item.column())
+        if field is not None:
+            self._edit_waypoint_attribute(
+                item.row(), field, item.checkState() == Qt.CheckState.Checked
+            )
+
+    def _edit_waypoint_attribute(self, row: int, field: str, value: bool | int) -> None:
+        """修改单项属性并刷新类型色，复用原有日志及预览通知。"""
+        if not self._editing_enabled or not 0 <= row < len(self._waypoints):
+            return
+        waypoint = self._waypoints[row]
+        if getattr(waypoint, field) == value:
+            return
+        self._waypoints[row] = waypoint._replace(**{field: value})
+        if field == "calibration_tag_id":
+            self.table.item(row, 7).setText(str(value))
+        self._refresh_row_style(row)
+        self.status_label.setText(f"已修改本地航点 #{row + 1} 的属性，尚未上传。")
+        self.waypoints_changed.emit(f"已修改航点 #{row + 1} 的 {field}")
+
+    def _refresh_row_style(self, row: int) -> None:
+        """用编号与属性列的颜色及文字提示区分航点类型，不改变坐标值。"""
+        waypoint = self._waypoints[row]
+        label, foreground, background = self._TYPE_STYLES[
+            (waypoint.is_inspection, waypoint.is_calibration)
+        ]
+        with QSignalBlocker(self.table):
+            for column in (0, 5, 6):
+                item = self.table.item(row, column)
+                item.setForeground(QColor(COLORS[foreground]))
+                item.setBackground(QColor(COLORS[background]))
+                item.setToolTip(label)
+
+
+    def _remove_selected(self) -> None:
+        """删除当前选中行并保持邻近选择。"""
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self._waypoints):
+            return
+        self._waypoints.pop(row)
+        next_row = min(row, len(self._waypoints) - 1) if self._waypoints else None
+        self._refresh_table(next_row)
+        self.waypoints_changed.emit(f"已删除航点 #{row + 1}")
+
+    def _move_selected(self, offset: int) -> None:
+        """将选中航点上移或下移一行。"""
+        row = self.table.currentRow()
+        target = row + offset
+        if row < 0 or target < 0 or target >= len(self._waypoints):
+            return
+        self._waypoints[row], self._waypoints[target] = (
+            self._waypoints[target],
+            self._waypoints[row],
+        )
+        self._refresh_table(target)
+        self.waypoints_changed.emit(f"航点 #{row + 1} 已移动至 #{target + 1}")
+
+    def clear_waypoints(self) -> None:
+        """在主窗口完成二次确认后清空本地航点。"""
+        count = len(self._waypoints)
+        self._waypoints.clear()
+        self._refresh_table()
+        self.reset_progress()
+        self.status_label.setText("航点列表已清空。")
+        self.waypoints_changed.emit(f"已清空 {count} 个航点")
+
+    def replace_waypoints(
+        self,
+        waypoints: WaypointCollection | tuple[tuple[float, float, float, float], ...],
+        source_label: str,
+    ) -> None:
+        """在主窗口完成文件校验与确认后原子替换本地航点列表。"""
+        self._waypoints[:] = [Waypoint(*waypoint) for waypoint in waypoints]
+        self._refresh_table(0)
+        self.reset_progress()
+        count = len(self._waypoints)
+        self.status_label.setText(f"已从 {source_label} 导入 {count} 个航点，尚未上传。")
+        self.waypoints_changed.emit(f"已从 {source_label} 导入 {count} 个航点")
+
+    def reset_progress(self) -> None:
+        """清除已结束任务的进度，并忽略机载端短期残留的旧快照。"""
+        self._progress_tracking = False
+        self._progress_completed = False
+        self._result_message = ""
+        self.status_label.hide()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat("尚未执行")
+
+    def _refresh_table(self, selected_row: int | None = None) -> None:
+        """重建坐标、独立复选框和 Tag ID；阻断刷新信号，保留全部属性。"""
+        with QSignalBlocker(self.table):
+            self.table.setRowCount(len(self._waypoints))
+            for row, waypoint in enumerate(self._waypoints):
+                values = (
+                    str(row + 1),
+                    f"{waypoint.x:+.2f}",
+                    f"{waypoint.y:+.2f}",
+                    f"{waypoint.z:+.2f}",
+                    f"{math.degrees(waypoint.yaw):+.1f}",
+                    "", "", str(waypoint.calibration_tag_id), "",
+                )
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    if column == 0 or column in self._BOOLEAN_FIELDS:
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if column in self._BOOLEAN_FIELDS:
+                        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        item.setCheckState(
+                            Qt.CheckState.Checked if getattr(waypoint, self._BOOLEAN_FIELDS[column])
+                            else Qt.CheckState.Unchecked
+                        )
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.table.setItem(row, column, item)
+                self._refresh_row_style(row)
+        if selected_row is not None and 0 <= selected_row < self.table.rowCount():
+            self.table.selectRow(selected_row)
+        self._update_local_controls()
+
+    def _update_local_controls(self) -> None:
+        """按选择行、编辑锁和列表内容更新本地操作按钮。"""
+        row = self.table.currentRow()
+        valid = 0 <= row < len(self._waypoints)
+        self.add_current_button.setEnabled(
+            self._editing_enabled and self._current_pose is not None
+        )
+        self.remove_button.setEnabled(self._editing_enabled and valid)
+        self.up_button.setEnabled(self._editing_enabled and valid and row > 0)
+        self.down_button.setEnabled(
+            self._editing_enabled and valid and row < len(self._waypoints) - 1
+        )
+        self.clear_button.setEnabled(self._editing_enabled and bool(self._waypoints))
+        self.preview_button.setEnabled(
+            self._preview_enabled and bool(self._waypoints)
+        )
+        self.import_button.setEnabled(self._editing_enabled)
+        self.export_button.setEnabled(bool(self._waypoints))
+        if not self._waypoints:
+            self.preview_button.setToolTip("请先添加或导入至少一个航点")
+            self.export_button.setToolTip("请先添加或导入至少一个航点")
+        else:
+            self.export_button.setToolTip(
+                str(self.export_button.property("baseToolTip") or "")
+            )
+            if self._preview_enabled or self._editing_enabled:
+                self.preview_button.setToolTip(
+                    str(self.preview_button.property("baseToolTip") or "")
+                )
+
+    def apply_availability(self, state: UiAvailability) -> None:
+        """仅在已启动仿真/实机会话时可编辑；上传仍受完整飞行门控。"""
+        self._editing_enabled = state.waypoint_edit
+        self._configuration_enabled = state.waypoint_configuration
+        self._preview_enabled = state.waypoint_preview
+        for control in (
+            self.x_input,
+            self.y_input,
+            self.z_input,
+            self.yaw_input,
+            self.add_button,
+            self.import_button,
+        ):
+            control.setEnabled(state.waypoint_edit)
+        method_combos = (
+            self.strategy_combo,
+            self.reference_combo,
+            self.tracking_combo,
+        )
+        for combo in method_combos:
+            combo.setEnabled(state.waypoint_configuration)
+        self.table.setEnabled(state.waypoint_edit)
+        self.send_button.setEnabled(state.waypoint_send)
+        if not state.waypoint_edit:
+            edit_tip = (
+                state.flight_reason
+                if state.flight_reason
+                else "需先启动仿真或连接机载服务"
+            )
+            for control in (
+                self.x_input,
+                self.y_input,
+                self.z_input,
+                self.yaw_input,
+                self.add_button,
+                self.remove_button,
+                self.up_button,
+                self.down_button,
+                self.clear_button,
+                self.import_button,
+                self.table,
+                self.send_button,
+            ):
+                control.setToolTip(edit_tip)
+        else:
+            for control in (
+                self.x_input,
+                self.y_input,
+                self.z_input,
+                self.yaw_input,
+                self.add_button,
+                self.remove_button,
+                self.up_button,
+                self.down_button,
+                self.clear_button,
+                self.import_button,
+                self.table,
+            ):
+                control.setToolTip(str(control.property("baseToolTip") or ""))
+            self.send_button.setToolTip(state.flight_reason)
+        if state.waypoint_configuration:
+            for combo in method_combos:
+                combo.setToolTip(str(combo.property("baseToolTip") or ""))
+        else:
+            configuration_tip = (
+                "飞行过程中禁止修改航点策略、命令生成和跟踪控制；"
+                "请在降落并解除武装后选择下一组实验配置。"
+                if state.waypoint_edit
+                else state.flight_reason
+            )
+            for combo in method_combos:
+                combo.setToolTip(configuration_tip)
+        if not self._waypoints:
+            preview_tip = "请先添加或导入至少一个航点"
+        elif state.waypoint_preview:
+            preview_tip = str(self.preview_button.property("baseToolTip") or "")
+        else:
+            preview_tip = state.flight_reason or "需先启动仿真或连接机载服务"
+        self.preview_button.setToolTip(preview_tip)
+        self._apply_strategy_constraints()
+        self._update_local_controls()
+
+    def update_progress(self, snapshot: VehicleSnapshot) -> None:
+        """把机载 1-based 当前目标索引换算为实际已完成航点格数。"""
+        self._locked_configuration = snapshot.armed and snapshot.waypoint_configuration_locked
+        if self._locked_configuration:
+            # 重连时恢复服务端锁值；当前悬停参考可能为阶跃，不能据此推断飞行配置。
+            for combo, value in (
+                (self.strategy_combo, WaypointFlightStrategy.from_value(snapshot.flight_strategy)),
+                (self.reference_combo, WaypointReferenceGenerator.from_value(snapshot.locked_reference_generator)),
+                (self.tracking_combo, WaypointTrackingController.from_value(snapshot.locked_tracking_controller)),
+            ):
+                blocked = combo.blockSignals(True)
+                combo.setCurrentIndex(combo.findData(value))
+                combo.blockSignals(blocked)
+            self._apply_strategy_constraints()
+        details = []
+        if snapshot.calibration_active or snapshot.calibration_detail:
+            phase = "校准中" if snapshot.calibration_active else "校准状态"
+            job = f"（job: {snapshot.calibration_job_id}）" if snapshot.calibration_job_id else ""
+            details.append(
+                f"航点 #{snapshot.waypoint_index} {phase}{job}："
+                f"{snapshot.calibration_detail or '等待校准服务状态'}"
+            )
+        if snapshot.flight_strategy != WaypointFlightStrategy.STRAIGHT:
+            state = {0: "未启用", 1: "等待可行路线", 2: "执行中", 3: "制动", 4: "超时降落"}
+            detail = state.get(snapshot.avoidance_state, "未知状态")
+            if snapshot.avoidance_state in (1, 3):
+                detail += f"（剩余 {snapshot.avoidance_wait_remaining_seconds:.1f} s）"
+            details.append(detail + "：" + snapshot.avoidance_detail)
+        # 任务失败后普通直线模式也保留可靠结果，不能被下一帧遥测隐藏。
+        if self._result_message:
+            details.append(self._result_message)
+        message = "\n".join(details)
+        set_tooltip_if_changed(self.progress, message)
+        set_text_if_changed(self.status_label, message)
+        self.status_label.setVisible(bool(message))
+        if self._progress_tracking and snapshot.waypoint_count > 0:
+            self.progress.setRange(0, snapshot.waypoint_count)
+            # 校准/接管后的索引仍可能停在末点；只有可靠成功终态能填满最后一格。
+            progress_value = self.progress.value()
+            if self._progress_completed:
+                progress_value = snapshot.waypoint_count
+            elif snapshot.active_mode is FlightMode.WAYPOINT:
+                progress_value = max(0, snapshot.waypoint_index - 1)
+            progress_value = min(progress_value, snapshot.waypoint_count)
+            self.progress.setValue(progress_value)
+            self.progress.setFormat(
+                f"已完成 {progress_value}/{snapshot.waypoint_count}"
+            )
+
+    def complete_progress(self, waypoint_index: int, waypoint_count: int) -> None:
+        """用可靠成功终态补齐可能被 LAND 状态覆盖的最后一格。"""
+        if waypoint_count <= 0 or waypoint_index != waypoint_count:
+            return
+        self._progress_tracking = True
+        self._progress_completed = True
+        self.progress.setRange(0, waypoint_count)
+        self.progress.setValue(waypoint_count)
+        self.progress.setFormat(f"已完成 {waypoint_count}/{waypoint_count}")
+
+    def set_result(self, message: str, running: bool) -> None:
+        """展示可靠命令结果，并在运行期间明确锁定上传按钮文本。"""
+        # 仅在任务首次进入运行态时初始化；后续每个机载 RUNNING 结果不得
+        # 把已经推进的进度短暂重置成“等待”，否则界面会每到一个点闪烁。
+        if running and not self._progress_tracking:
+            self._progress_tracking = True
+            self._progress_completed = False
+            self.progress.setRange(0, max(1, len(self._waypoints)))
+            self.progress.setValue(0)
+            self.progress.setFormat("等待机载任务进度…")
+        self._result_message = message
+        self.status_label.setText(message)
+        self.status_label.setVisible(bool(message))
+        self.send_button.setText("任务执行中…" if running else "发送并执行航点")

@@ -1,0 +1,33 @@
+# 起降、悬停、取消和维护命令的统一请求接口。
+uint8 COMMAND_TAKEOFF=1
+uint8 COMMAND_LAND=2
+uint8 COMMAND_HOVER=3
+uint8 COMMAND_CANCEL=4
+uint8 COMMAND_CONFIGURE_RATES=5
+uint8 COMMAND_CLEAR_ABNORMAL=6
+uint8 COMMAND_REBOOT_FCU=7
+
+# stamp 只相对当前租约心跳基准校验 TTL，不要求机载端与地面站绝对墙钟一致。
+builtin_interfaces/Time stamp
+string source_id
+uint64 sequence
+uint32 ttl_ms
+uint8 command
+# TAKEOFF: target Z in the active map/odom task frame, not a relative climb.
+float64 value
+# TAKEOFF 锁定本次飞行策略、参考生成器和跟踪器；其它命令忽略此配置。
+uint8 STRATEGY_STRAIGHT=0
+uint8 STRATEGY_AVOID=1
+uint8 STRATEGY_HOVER_ON_OBSTACLE=2
+uint8 flight_strategy 0
+uint8 REFERENCE_STEP_POSITION=0
+uint8 REFERENCE_SECOND_ORDER_FILTER=1
+uint8 REFERENCE_TRAPEZOIDAL_PROFILE=2
+uint8 REFERENCE_JERK_LIMITED_S_CURVE=3
+uint8 reference_generator 0
+uint8 TRACKING_POSITION_PD_DOB=0
+uint8 TRACKING_TRAJECTORY_PD_DOB=1
+uint8 tracking_controller 0
+---
+bool accepted
+string message

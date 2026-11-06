@@ -1,0 +1,14 @@
+{
+  "source_repository": "https://github.com/xldoooooo/ros2-ardupilot-mavros-control",
+  "source_commit": "048bde8459d4c18f7deb9e44dab02aa94e323013",
+  "freeze_date": "2026-11-07",
+  "registration_version": "V1.0",
+  "source_protocol_version": "3.6",
+  "software_directories": [
+    "ground-station",
+    "onboard-control",
+    "position-calibration",
+    "inspection-media"
+  ],
+  "scope": "四项应用软件源码；共享ROS接口作为依赖随相应目录提供。各项交存范围以SOURCE_MANIFEST.json为准。"
+}

@@ -1,0 +1,47 @@
+<!-- FCU odometry input, planar correction and local navigation conventions. -->
+# extnav_bridge
+
+Odin 到 MAVROS 的单线程 C++ 外部导航桥，保留 correction 2.0 的 session/revision CAS、幂等请求和计数接口。生产入口为 `ros2 run extnav_bridge extnav_to_vision_pose`。
+
+## 坐标与输入
+
+唯一输入 `/odin1/odometry_highfreq` 必须为标准 `nav_msgs/Odometry`：`header.frame_id=odom`，`child_frame_id=fcu`，pose 是 `O←F`，线速度与角速度均以 FCU FLU 机体系表达。旧 IMU 中心输入会停止最终输出并报告错误，避免重复安装补偿。
+
+固定安装外参由项目 Odin 驱动处理；桥不再旋转机体轴或补偿杆臂。`odin_extrinsics.yaml` 的 `/**/ros__parameters` 与驱动共享安装参数，节点专用 `/extnav_to_vision_pose` 保留频率、话题等设置。`roll_cam/pitch_cam/yaw_cam` 只作为状态元数据；`odin_xyz` 是 FCU→Odin IMU、以水平 FLU 表达的米制向量，同时保留原有局部原点偏移 `b`。自动安装俯仰已禁用；旧 `auto_installation: true` 只产生提示，不修改外参。
+
+最终输出采用以下约定：
+
+```text
+无有效 Tag：p_final = p_raw + b，R_final = R_raw
+有效 Tag：  p_final.xy = (Rz*p_raw+t).xy
+            p_final.z  = p_raw.z+b.z，R_final = Rz*R_raw
+```
+
+`b` 是常量局部原点约定，不是再次随姿态旋转的安装杆臂。Tag 仅修正 XY/yaw，Z 继续使用原局部高度。非零安装俯仰可正常应用 Tag 修正。
+
+`/odin1/odometry_highfreq_corrected` 仍表示 FCU 中心：pose 左乘世界修正，pose 的完整 6×6 covariance 按同一 yaw 旋转；FCU 机体系 twist 及其 covariance 原样保留。最终 `/extnav/pose_fcu`、`/mavros/vision_pose/pose` 使用同一 raw 冻结快照。`/extnav/velocity_fcu` 的 header 为 `odom`，线速度及角速度均按最终姿态从 F 旋到该世界轴。
+
+## 时序与修正接口
+
+每条合格 raw 都参与会话处理。Odin 断流、时间戳回退及不合格 frame 使旧修正失效；修正服务退出本身不清 active。apply、clear 或失效后须等待下一条 raw 建立新快照。状态保持 2 Hz 加事件发布，分别报告 active 修正与最终冻结样本身份；安装元数据和 `lever_arm_*` 字段保留原接口。
+
+vision 默认 30 Hz，辅助输出默认 100 Hz，机载启动器可配置为 40/100 Hz。corrected 在有读者时按 raw 频率发布，读者状态每 0.1 秒查询；辅助 pose/velocity 各自在无读者时跳过构造及发布，控制 timer 计数仍推进。
+
+## 构建与启动
+
+在独立 `position-calibration` 软件目录执行：
+
+```bash
+./build.sh
+./run_extnav.sh
+```
+
+该构建入口同时构建 `correction_interfaces`、原生采集检测模块、校准服务和本桥。使用目标主机的 ROS 2 环境原生构建，安装产物位于软件目录的 `install/`。
+
+## 维护
+
+- `include/extnav_bridge/math.hpp`：世界修正、局部原点、body/world 速度与协方差转换。
+- `src/extnav_to_vision_pose.cpp`：参数、会话、修正事务、冻结快照和 ROS 发布。
+- `extnav_to_vision_pose.py`：同步语义的 Python 数学及公共接口比较参考，非生产入口。
+
+`PoseStamped` 无法携带 MAVLink estimator reset_counter；该计数仍仅在修正状态中报告。

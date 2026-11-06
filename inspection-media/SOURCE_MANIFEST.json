@@ -1,0 +1,181 @@
+{
+  "software": "无人机巡检视频处理与媒体管理软件",
+  "version": "V1.0",
+  "source_baseline": "048bde8459d4c18f7deb9e44dab02aa94e323013",
+  "listing_rule": "UTF-8文件按source_files次序连接；去除注释、文档字符串及空行，保留程序文本；Tab展开为4空格。",
+  "total_program_lines": 6447,
+  "submitted_lines": 3000,
+  "selected_ranges": [
+    [
+      1,
+      1500
+    ],
+    [
+      4948,
+      6447
+    ]
+  ],
+  "files": [
+    {
+      "path": "video_service/camera_app/controller.py",
+      "sha256": "c064014567b0c137cd0b107b5c476b3a94207940909a3660682b5b0f62bbc84a",
+      "start_line": 1,
+      "end_line": 952,
+      "program_lines": 952
+    },
+    {
+      "path": "video_service/camera_app/config.py",
+      "sha256": "228272def75c086cdd153a0b6a684422e11411e915538c5a59c893a6e34cc40e",
+      "start_line": 953,
+      "end_line": 1330,
+      "program_lines": 378
+    },
+    {
+      "path": "video_service/camera_app/onboard_config.py",
+      "sha256": "e651459e9f93f510b52bf3f780f7eb88ab29133f0dc98d6eef3c5aedd71c4cdc",
+      "start_line": 1331,
+      "end_line": 1414,
+      "program_lines": 84
+    },
+    {
+      "path": "video_service/camera_app/ipc.py",
+      "sha256": "abceb311ea11ecf92949033be85840ec1aa862be869f285e60696238853ecab9",
+      "start_line": 1415,
+      "end_line": 1604,
+      "program_lines": 190
+    },
+    {
+      "path": "video_service/camera_service.py",
+      "sha256": "af49a0d4c1ae23690c61dd1916fd868ea7346b5bc99a6bd40cfc181f5dd5d607",
+      "start_line": 1605,
+      "end_line": 1688,
+      "program_lines": 84
+    },
+    {
+      "path": "video_service/onboard_video_node.py",
+      "sha256": "c376a556b3368d1073f3546a63358cb9c2b59b1d10e8bc635b68516c62182ecb",
+      "start_line": 1689,
+      "end_line": 2030,
+      "program_lines": 342
+    },
+    {
+      "path": "video_service/onboard_media.py",
+      "sha256": "c0b48b862475efb2b1093527e1e348031d87bfc864aee8354b914fb5c350965f",
+      "start_line": 2031,
+      "end_line": 2213,
+      "program_lines": 183
+    },
+    {
+      "path": "video_service/media_transfer.py",
+      "sha256": "6907a049382d7bb878d53627eec59baa645eaedad34bc176c0f0f87ee737ef18",
+      "start_line": 2214,
+      "end_line": 2551,
+      "program_lines": 338
+    },
+    {
+      "path": "video_service/media_store.py",
+      "sha256": "845f092450059ef51785f0711f6d24fd565f408aeda29508a7df9eb095493f42",
+      "start_line": 2552,
+      "end_line": 2906,
+      "program_lines": 355
+    },
+    {
+      "path": "video_service/ground_media.py",
+      "sha256": "c98419776b67c5a6ea7ab73f0337c16bf78d52970aded44d6db9db8466d11aa6",
+      "start_line": 2907,
+      "end_line": 3625,
+      "program_lines": 719
+    },
+    {
+      "path": "video_service/ground_relay.py",
+      "sha256": "644bb40674b55f07ed2f9fb076181f9e0a7ea8982df95dc1d3a54d1b2522ede9",
+      "start_line": 3626,
+      "end_line": 3965,
+      "program_lines": 340
+    },
+    {
+      "path": "video_service/relay_calibration.py",
+      "sha256": "5ed3fc81be5a6a70c6326678b55d625a194aec1c3b85f568d5134fb65b4de0ef",
+      "start_line": 3966,
+      "end_line": 4014,
+      "program_lines": 49
+    },
+    {
+      "path": "video_service/relay_cpu.py",
+      "sha256": "707eb524d97c4550e4cb7189f56a7f6814d99a27071f9bea5fa73d7978b0173a",
+      "start_line": 4015,
+      "end_line": 4117,
+      "program_lines": 103
+    },
+    {
+      "path": "video_service/relay_config.py",
+      "sha256": "0dae00af53211281c918f1fb71aebe26ff8a3446db9eb8421f3db9cded70d6ed",
+      "start_line": 4118,
+      "end_line": 4176,
+      "program_lines": 59
+    },
+    {
+      "path": "video_service/shaders/undistort_nv12.cl",
+      "sha256": "6c827c070d75c6dfb5f575352330800f8e22a17f853f40e8b02e71a61a6149ef",
+      "start_line": 4177,
+      "end_line": 4197,
+      "program_lines": 21
+    },
+    {
+      "path": "video_service/shaders/undistort.hook",
+      "sha256": "68f2babe3a8e1076e6a710a62a11c39c794a4fd94523c4de7135a928c760d2cd",
+      "start_line": 4198,
+      "end_line": 4212,
+      "program_lines": 15
+    },
+    {
+      "path": "video_service/file_manager_app.py",
+      "sha256": "77b901d2899d9929517e3937bfdf03541c374401e9d4fd7a97b6b7a9bc5a564d",
+      "start_line": 4213,
+      "end_line": 4730,
+      "program_lines": 518
+    },
+    {
+      "path": "video_service/file_manager.py",
+      "sha256": "9fdd67abb16605679c5c8cfbaea8663d2c125e15e1c38205f86a678fbd33fe1a",
+      "start_line": 4731,
+      "end_line": 4758,
+      "program_lines": 28
+    },
+    {
+      "path": "video_service/camera_app/panel.py",
+      "sha256": "aad2e970fcda598153bda1ae135fcba27bdfcebbf70c238869fdb6934ccc3109",
+      "start_line": 4759,
+      "end_line": 5864,
+      "program_lines": 1106
+    },
+    {
+      "path": "video_service/camera_app/media_status.py",
+      "sha256": "783ab004a0067a137b1c024d57471ad6b5f0a722433202d12df60999207410ea",
+      "start_line": 5865,
+      "end_line": 6083,
+      "program_lines": 219
+    },
+    {
+      "path": "video_service/camera_app/relay_status.py",
+      "sha256": "ee4f59492bed71b407595f361b35dfa9268dd0f782d851a80b8e9409e58a1e2d",
+      "start_line": 6084,
+      "end_line": 6169,
+      "program_lines": 86
+    },
+    {
+      "path": "video_service/camera_app/ros_client.py",
+      "sha256": "0266ab2be228d1358c06354ede86de34c24675542c46983a3a2fbab64586397a",
+      "start_line": 6170,
+      "end_line": 6416,
+      "program_lines": 247
+    },
+    {
+      "path": "video_service/camera_panel.py",
+      "sha256": "abec5dd1a154ffeb26bfb1be2fcac068ab40e81e0b335c1f6a7377d1ae877590",
+      "start_line": 6417,
+      "end_line": 6447,
+      "program_lines": 31
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+# Fixed mounting: R_FI=Ry(pitch_cam); FCU->IMU is in FCU FLU, metres.
+# Host alone applies mounting. Extnav reuses odin_xyz only as its legacy local-origin offset.
+/**:
+  ros__parameters:
+    roll_cam: 0.0
+    pitch_cam: -0.4363323129985824
+    yaw_cam: 0.0
+    odin_x: 0.1
+    odin_y: -0.029
+    odin_z: 0.06
+    # Installation is fixed; no startup gravity calibration.
+    auto_installation: false
+/extnav_to_vision_pose:
+  ros__parameters:
+    vision_rate_hz: 40.0
+    ctrl_rate_hz: 100.0
+    odom_topic: /odin1/odometry_highfreq

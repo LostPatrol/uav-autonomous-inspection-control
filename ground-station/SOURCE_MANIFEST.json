@@ -1,0 +1,279 @@
+{
+  "software": "无人机巡检地面监控与任务管理软件",
+  "version": "V1.0",
+  "source_baseline": "048bde8459d4c18f7deb9e44dab02aa94e323013",
+  "listing_rule": "UTF-8文件按source_files次序连接；去除注释、文档字符串及空行，保留程序文本；Tab展开为4空格。",
+  "total_program_lines": 13554,
+  "submitted_lines": 3000,
+  "selected_ranges": [
+    [
+      1,
+      1500
+    ],
+    [
+      12055,
+      13554
+    ]
+  ],
+  "files": [
+    {
+      "path": "ground_station.py",
+      "sha256": "653356ee70645d92a35caeaf6bbe7408ac8237d7efa1921ada5f11e53c4d6e91",
+      "start_line": 1,
+      "end_line": 121,
+      "program_lines": 121
+    },
+    {
+      "path": "ground_station_core/__init__.py",
+      "sha256": "eb06be15a7d37a2d2bcbce9e40f9141c08a682b89ea7177912fa323cbcfc1648",
+      "start_line": 122,
+      "end_line": 124,
+      "program_lines": 3
+    },
+    {
+      "path": "ground_station_core/bootstrap.py",
+      "sha256": "3c9ea0a52db95741b3c66abef385184b0fc74ded61b7b52da1aa6484aa0e764c",
+      "start_line": 125,
+      "end_line": 196,
+      "program_lines": 72
+    },
+    {
+      "path": "ground_station_core/config.py",
+      "sha256": "54d55949db7be021f051cfd302d416c4c8312082affe0ca1844c6ae39e67ae0a",
+      "start_line": 197,
+      "end_line": 340,
+      "program_lines": 144
+    },
+    {
+      "path": "ground_station_core/environment.py",
+      "sha256": "68b438066712044c41161864f109b012f3516b92953a80dcf382a0b6a1bce7a7",
+      "start_line": 341,
+      "end_line": 1268,
+      "program_lines": 928
+    },
+    {
+      "path": "ground_station_core/event_log.py",
+      "sha256": "cbac5ebb36d79a9c51c7b749d004389f43fc4d1526b3980c9afc8dcde9945feb",
+      "start_line": 1269,
+      "end_line": 1358,
+      "program_lines": 90
+    },
+    {
+      "path": "ground_station_core/ground_media_reader.py",
+      "sha256": "983966069beb4d2334c421027dec267c73b5540b9895bb55eaca6677cfefa55e",
+      "start_line": 1359,
+      "end_line": 1515,
+      "program_lines": 157
+    },
+    {
+      "path": "ground_station_core/models.py",
+      "sha256": "3371730a18fab449db54deb6c6bdb0ce777fc1cfeed92ebca1b690d53232a832",
+      "start_line": 1516,
+      "end_line": 1720,
+      "program_lines": 205
+    },
+    {
+      "path": "ground_station_core/process_manager.py",
+      "sha256": "684f33daeaf8846589f659f980de72fb87bc15c47ebd51d0598cf1e2cc279933",
+      "start_line": 1721,
+      "end_line": 2344,
+      "program_lines": 624
+    },
+    {
+      "path": "ground_station_core/qt_ui/__init__.py",
+      "sha256": "9cb42ce9f258ebb106aacdc2ee2c6819719fe7d7f0de3028464b410677beb134",
+      "start_line": 2345,
+      "end_line": 2346,
+      "program_lines": 2
+    },
+    {
+      "path": "ground_station_core/qt_ui/cached_shadow.py",
+      "sha256": "98809143c92211cd8d05099adc7f80c600fa87ae4fae6083822bfdf8c620d0ec",
+      "start_line": 2347,
+      "end_line": 2488,
+      "program_lines": 142
+    },
+    {
+      "path": "ground_station_core/qt_ui/log_history.py",
+      "sha256": "9686b7380191b9e3f78bcade3ce3dc43b8800c530d85d4d49fef4ac7c9a16881",
+      "start_line": 2489,
+      "end_line": 2616,
+      "program_lines": 128
+    },
+    {
+      "path": "ground_station_core/qt_ui/log_panel.py",
+      "sha256": "9cc89e06a3b5e4bd9ae545d6ad4f32567be460c2c521c535e4721531eca65546",
+      "start_line": 2617,
+      "end_line": 2883,
+      "program_lines": 267
+    },
+    {
+      "path": "ground_station_core/qt_ui/main_window.py",
+      "sha256": "a1a6bd47a22b71824be686d670c47475a7c62f2b0aab5229a37c8e5d765d4be5",
+      "start_line": 2884,
+      "end_line": 5393,
+      "program_lines": 2510
+    },
+    {
+      "path": "ground_station_core/qt_ui/operations_panel.py",
+      "sha256": "9f59630ece19704fbc68a2c5ab07f4fc7c14f9769c2433b67eb77745b906064c",
+      "start_line": 5394,
+      "end_line": 6597,
+      "program_lines": 1204
+    },
+    {
+      "path": "ground_station_core/qt_ui/state.py",
+      "sha256": "3d3cc29ea2cb5e97a9d6d952d3f9f020d392f307b9775bb0dd3f431a7ed3c300",
+      "start_line": 6598,
+      "end_line": 6776,
+      "program_lines": 179
+    },
+    {
+      "path": "ground_station_core/qt_ui/theme.py",
+      "sha256": "6e860aeaa3df67c4fa062716eba23a028726a573ac67529ea82590bf5feab197",
+      "start_line": 6777,
+      "end_line": 7340,
+      "program_lines": 564
+    },
+    {
+      "path": "ground_station_core/qt_ui/upstream_panel.py",
+      "sha256": "38a9b39138ddba363fa2eee19137d70023a8a939b3628132c777123c69d274c6",
+      "start_line": 7341,
+      "end_line": 7634,
+      "program_lines": 294
+    },
+    {
+      "path": "ground_station_core/qt_ui/waypoint_panel.py",
+      "sha256": "8fc5035698981abd21e06b224869cda380e1ac22741c89da2f8b8ba0040286e6",
+      "start_line": 7635,
+      "end_line": 8550,
+      "program_lines": 916
+    },
+    {
+      "path": "ground_station_core/qt_ui/widgets.py",
+      "sha256": "7052b3189ba1edb590f486b01fb61b6936b380d611fb26df646daabceb207625",
+      "start_line": 8551,
+      "end_line": 8937,
+      "program_lines": 387
+    },
+    {
+      "path": "ground_station_core/qt_ui/window_chrome.py",
+      "sha256": "1085dc1ac96b7ff28a44430f73bc25012707c6c21b95619dbd230313a3c41edb",
+      "start_line": 8938,
+      "end_line": 9098,
+      "program_lines": 161
+    },
+    {
+      "path": "ground_station_core/ros_controller.py",
+      "sha256": "6857c952cf90336199882d990abfdf8f05ae5cf5d938ee133e6c4206b180f8da",
+      "start_line": 9099,
+      "end_line": 10836,
+      "program_lines": 1738
+    },
+    {
+      "path": "ground_station_core/startup.py",
+      "sha256": "398a21e7fc3a3ac03608673b989c042208a8ccdd5628dee3a3389d4c3bac9cd6",
+      "start_line": 10837,
+      "end_line": 10906,
+      "program_lines": 70
+    },
+    {
+      "path": "ground_station_core/upstream/__init__.py",
+      "sha256": "cbf786b5e5c1849976328fb933f7ddfe831670647cfa9507b4b1f23649074be9",
+      "start_line": 10907,
+      "end_line": 10922,
+      "program_lines": 16
+    },
+    {
+      "path": "ground_station_core/upstream/journal.py",
+      "sha256": "e97727d951bda3f213eb1aa2665b863814d6fd8ff817347c488e8d514a4a4d52",
+      "start_line": 10923,
+      "end_line": 10954,
+      "program_lines": 32
+    },
+    {
+      "path": "ground_station_core/upstream/mapping.py",
+      "sha256": "ff823bb2d88df6a81e945f65d110eb03af4b06d754d82747bc7ed8258e750933",
+      "start_line": 10955,
+      "end_line": 11135,
+      "program_lines": 181
+    },
+    {
+      "path": "ground_station_core/upstream/models.py",
+      "sha256": "245797c8a730191d950cd9580112fcc012b230ab11824ff92786a6f3d769f320",
+      "start_line": 11136,
+      "end_line": 11196,
+      "program_lines": 61
+    },
+    {
+      "path": "ground_station_core/upstream/protocol.py",
+      "sha256": "d4725efef8664f7c212bc0db8575b4b02762d82836466ae01071197679ac8e57",
+      "start_line": 11197,
+      "end_line": 11431,
+      "program_lines": 235
+    },
+    {
+      "path": "ground_station_core/upstream/service.py",
+      "sha256": "122f4b3b905513b493d0d9ff03ab8de17283a25c6dc824f300d5baf2ffc3a054",
+      "start_line": 11432,
+      "end_line": 12133,
+      "program_lines": 702
+    },
+    {
+      "path": "ground_station_core/upstream/simulation_media.py",
+      "sha256": "8572e750671db6ed97fe9f3d6eaa2d9b1f738bc84683782952ac0c00b3595fa8",
+      "start_line": 12134,
+      "end_line": 12335,
+      "program_lines": 202
+    },
+    {
+      "path": "ground_station_core/upstream/status_projector.py",
+      "sha256": "0a6dfe4fa8742536b6c8d68e853d2d051ef64528cc04d44dc1c680609247cb9f",
+      "start_line": 12336,
+      "end_line": 12878,
+      "program_lines": 543
+    },
+    {
+      "path": "ground_station_core/waypoint_io.py",
+      "sha256": "1ba66f73eff6ca6adbc6e63583128c6bfd68564001a47e6baee40cc5dce9880b",
+      "start_line": 12879,
+      "end_line": 13163,
+      "program_lines": 285
+    },
+    {
+      "path": "src/guided_sim/launch/avoidance_demo.launch.py",
+      "sha256": "3cccb662c52561e71019c532010ba57f56b5aa42914f5187c82be3f61a1b1724",
+      "start_line": 13164,
+      "end_line": 13185,
+      "program_lines": 22
+    },
+    {
+      "path": "src/guided_sim/launch/visualize.launch.py",
+      "sha256": "455501e0c040abbf4cb131d1e6b376d5edc50f9df51eb60c300e904f9df9c3b5",
+      "start_line": 13186,
+      "end_line": 13247,
+      "program_lines": 62
+    },
+    {
+      "path": "src/guided_sim/scripts/avoidance_preview.py",
+      "sha256": "27d9ec8f9661c425cd4a566571f02d432e8c66a0b99d1c13b9c396194e939533",
+      "start_line": 13248,
+      "end_line": 13337,
+      "program_lines": 90
+    },
+    {
+      "path": "src/guided_sim/scripts/pose_to_tf.py",
+      "sha256": "3c72899d7c1f71999f6fa20a44708ec2e6fa691f8385d82f56ed776a6ef7a628",
+      "start_line": 13338,
+      "end_line": 13415,
+      "program_lines": 78
+    },
+    {
+      "path": "src/guided_sim/scripts/simulation_obstacles.py",
+      "sha256": "6b681af94d6610483304e5111c0551b721a103601d5af6e3d031baa06f4b15d6",
+      "start_line": 13416,
+      "end_line": 13554,
+      "program_lines": 139
+    }
+  ]
+}

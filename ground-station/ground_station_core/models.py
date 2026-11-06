@@ -1,0 +1,266 @@
+"""地面站薄客户端跨 GUI、ROS 与环境编排共享的不可变模型。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+
+class FlightMode(str, Enum):
+    """由机载状态消息报告、GUI 只读展示的控制模式。"""
+
+    IDLE = "待机"
+    TAKEOFF = "起飞"
+    KEYBOARD = "键盘 PD+DOB"
+    HOVER = "悬停 PD+DOB"
+    WAYPOINT = "航点飞行"
+    LAND = "降落"
+    FAILSAFE = "失联保护"
+
+
+class WaypointFlightStrategy(int, Enum):
+    """起飞前锁定的机载航点策略；避障依赖规划桥的新鲜能力状态。"""
+
+    STRAIGHT = 0
+    AVOID = 1
+    HOVER_ON_OBSTACLE = 2
+
+    @property
+    def label(self) -> str:
+        """返回设置菜单与下拉框使用的中文名称。"""
+        return {
+            WaypointFlightStrategy.STRAIGHT: "直线飞行",
+            WaypointFlightStrategy.AVOID: "自动避障",
+            WaypointFlightStrategy.HOVER_ON_OBSTACLE: "遇到障碍悬停",
+        }[self]
+
+    @classmethod
+    def from_value(cls, value: object) -> "WaypointFlightStrategy":
+        """将任意整型/枚举值规范为已知策略，未知值回退为直线飞行。"""
+        try:
+            return cls(int(value))
+        except (TypeError, ValueError):
+            return cls.STRAIGHT
+
+
+class WaypointReferenceGenerator(int, Enum):
+    """航点命令生成方式；数值与 ExecuteWaypoints.srv 常量对齐。"""
+
+    STEP_POSITION = 0
+    SECOND_ORDER_FILTER = 1
+    TRAPEZOIDAL_PROFILE = 2
+    JERK_LIMITED_S_CURVE = 3
+    PLANNER_TRAJECTORY = 4  # 仅用于机载实际参考回读，不作为上传输入。
+
+    @property
+    def label(self) -> str:
+        """返回航点实验下拉框使用的短标签。"""
+        return {
+            WaypointReferenceGenerator.STEP_POSITION: "位置阶跃（基线）",
+            WaypointReferenceGenerator.SECOND_ORDER_FILTER: "二阶命令滤波",
+            WaypointReferenceGenerator.TRAPEZOIDAL_PROFILE: "普通梯形速度",
+            WaypointReferenceGenerator.JERK_LIMITED_S_CURVE: "限 jerk S 曲线",
+            WaypointReferenceGenerator.PLANNER_TRAJECTORY: "规划器带时间轨迹",
+        }[self]
+
+    @classmethod
+    def from_value(cls, value: object) -> "WaypointReferenceGenerator":
+        """把界面/调用值规范为已知方法，未知值安全回退到既有基线。"""
+        try:
+            return cls(int(value))
+        except (TypeError, ValueError):
+            return cls.STEP_POSITION
+
+
+class WaypointTrackingController(int, Enum):
+    """航点跟踪控制方式；两项仍复用唯一机载 DobController。"""
+
+    POSITION_PD_DOB = 0
+    TRAJECTORY_PD_DOB = 1
+
+    @property
+    def label(self) -> str:
+        """返回航点实验下拉框使用的短标签。"""
+        return {
+            WaypointTrackingController.POSITION_PD_DOB: "位置 PD+DOB（基线）",
+            WaypointTrackingController.TRAJECTORY_PD_DOB: "轨迹 PD+DOB",
+        }[self]
+
+    @classmethod
+    def from_value(cls, value: object) -> "WaypointTrackingController":
+        """把界面/调用值规范为已知控制器，未知值回退到既有基线。"""
+        try:
+            return cls(int(value))
+        except (TypeError, ValueError):
+            return cls.POSITION_PD_DOB
+
+
+@dataclass(frozen=True)
+class AvoidanceBackendSnapshot:
+    """独立可选避障管理器状态，不属于公共飞行协议。"""
+
+    manager_available: bool = False
+    backend: str = "cpu"
+    available: bool = False
+    ready: bool = False
+    error: str = "未发现可选后端管理器，使用 CPU 默认链路"
+    source: str = "cpu"
+    age_seconds: float = float("inf")
+
+
+@dataclass(frozen=True)
+class VehicleSnapshot:
+    """来自机载聚合状态接口的飞行器、租约和控制诊断快照。"""
+
+    onboard_available: bool = False
+    interface_version: str = ""
+    connected: bool = False
+    armed: bool = False
+    on_ground: bool = False
+    reboot_in_progress: bool = False
+    calibration_active: bool = False
+    calibration_job_id: str = ""
+    calibration_detail: str = ""
+    autopilot_mode: str = ""
+    navigation_frame: str = "odom"
+    navigation_ready: bool = True
+    navigation_detail: str = ""
+    navigation_map: str = ""
+    task_position: tuple[float, float, float] | None = None
+    task_velocity: tuple[float, float, float] | None = None
+    task_yaw: float | None = None
+    # Translation and quaternion map task coordinates into the FCU local frame.
+    task_to_local: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    yaw: float = 0.0
+    vx: float = 0.0
+    vy: float = 0.0
+    vz: float = 0.0
+    roll: float = 0.0
+    pitch: float = 0.0
+    battery_valid: bool = False
+    battery_voltage: float = 0.0
+    battery_current: float = 0.0
+    battery_percentage: float = 0.0
+    status_rate_hz: float = 0.0
+    status_age_seconds: float = 0.0
+    local_position_valid: bool = False
+    active_mode: FlightMode = FlightMode.IDLE
+    controller_active: bool = False
+    target_x: float = 0.0
+    target_y: float = 0.0
+    target_z: float = 0.0
+    target_yaw: float = 0.0
+    target_vx: float = 0.0
+    target_vy: float = 0.0
+    target_vz: float = 0.0
+    target_ax: float = 0.0
+    target_ay: float = 0.0
+    target_az: float = 0.0
+    target_yaw_rate: float = 0.0
+    active_reference_generator: WaypointReferenceGenerator = (
+        WaypointReferenceGenerator.STEP_POSITION
+    )
+    active_tracking_controller: WaypointTrackingController = (
+        WaypointTrackingController.POSITION_PD_DOB
+    )
+    reference_phase: int = 0
+    flight_strategy: WaypointFlightStrategy = WaypointFlightStrategy.STRAIGHT
+    waypoint_configuration_locked: bool = False
+    locked_reference_generator: WaypointReferenceGenerator = WaypointReferenceGenerator.STEP_POSITION
+    locked_tracking_controller: WaypointTrackingController = WaypointTrackingController.POSITION_PD_DOB
+    avoidance_ready: bool = False
+    avoidance_state: int = 0
+    avoidance_wait_remaining_seconds: float = 0.0
+    avoidance_detail: str = ""
+    lease_owner: str = ""
+    lease_active: bool = False
+    control_authority: bool = False
+    active_command_sequence: int = 0
+    waypoint_index: int = 0
+    waypoint_count: int = 0
+    waypoint_arrival_failure_count: int = 0
+    vehicle_abnormal: bool = False
+    vehicle_abnormal_reason: str = ""
+    message_rates_configured: bool = False
+    thrust_mode_verified: bool = False
+    hover_throttle: float = 0.0
+    endpoint_conflict: bool = False
+    setpoint_conflict: bool = False
+    failsafe_reason: str = ""
+    status_message: str = ""
+    control_rate_hz: float = 0.0
+    max_jitter_ms: float = 0.0
+    deadline_miss_count: int = 0
+
+
+    @property
+    def task_pose(self) -> tuple[float, float, float, float]:
+        """Return task coordinates, retaining local odom defaults for older callers."""
+        position = self.task_position or (self.x, self.y, self.z)
+        yaw = self.yaw if self.task_yaw is None else self.task_yaw
+        return (*position, yaw)
+
+    @property
+    def task_velocity_values(self) -> tuple[float, float, float]:
+        """Return task velocity or the equivalent local odom velocity."""
+        return self.task_velocity or (self.vx, self.vy, self.vz)
+
+
+@dataclass(frozen=True)
+class CommandRequest:
+    """从 GUI 投递给地面站 ROS 客户端线程的高层请求。"""
+
+    ticket: int
+    name: str
+    argument: object = None
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """ROS 后台结果；航点字段原样保留机载可靠进度。"""
+
+    sequence: int
+    ticket: int
+    command: str
+    success: bool
+    message: str
+    final: bool = True
+    waypoint_index: int = 0
+    waypoint_count: int = 0
+
+
+@dataclass(frozen=True)
+class VideoServiceSnapshot:
+    """独立视频服务的发现地址、媒体路径和带新鲜度的运行快照。"""
+
+    service_available: bool = False
+    interface_version: str = ""
+    running: bool = False
+    state: str = "unavailable"
+    rtsp_url: str = ""
+    video_directory: str = ""
+    image_directory: str = ""
+    current_video_path: str = ""
+    last_video_path: str = ""
+    last_image_path: str = ""
+    last_error: str = ""
+    age_seconds: float = float("inf")
+
+
+@dataclass(frozen=True)
+class VideoCaptureEvent:
+    """地面站按本地顺序消费的一条视频截图完成事件。"""
+
+    event_sequence: int
+    source_id: str
+    command_sequence: int
+    success: bool
+    kind: int
+    mission_sequence: int
+    waypoint_index: int
+    photo_no: str
+    path: str
+    message: str
