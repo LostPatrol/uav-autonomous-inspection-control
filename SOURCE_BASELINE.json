@@ -8,7 +8,21 @@
     "ground-station",
     "onboard-control",
     "position-calibration",
-    "inspection-media"
+    "inspection-media",
+    "pointcloud-planner",
+    "fpga-trajectory-planner"
   ],
-  "scope": "四项应用软件源码；共享ROS接口作为依赖随相应目录提供。各项交存范围以SOURCE_MANIFEST.json为准。"
+  "scope": "六项独立软件。原四项保留2026-11-07基线；新增CPU与FPGA规划采用各自目录SOURCE_BASELINE.json。共享消息等作为配套依赖，各项交存范围以SOURCE_MANIFEST.json为准。",
+  "additional_freeze_date": "2026-11-11",
+  "additional_software_baselines": {
+    "pointcloud-planner": {
+      "native_repository": "https://github.com/LostPatrol/dyn_small_obs_avoidance-ros2-modified",
+      "native_commit": "8b4630c930870bb3e71379a0731961d9fee54979",
+      "integration_commit": "541c529b4fa4f21e87121acbed4a17ba6e18ef4c"
+    },
+    "fpga-trajectory-planner": {
+      "integration_commit": "541c529b4fa4f21e87121acbed4a17ba6e18ef4c",
+      "source_directory": "fpga_avoidance"
+    }
+  }
 }

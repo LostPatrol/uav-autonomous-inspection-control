@@ -1,0 +1,126 @@
+{
+  "software": "无人机点云避障与局部轨迹规划软件",
+  "version": "V1.0",
+  "source_files": [
+    "src/path_searching/include/path_searching/kinodynamic_astar.h",
+    "src/path_searching/src/kinodynamic_astar.cpp",
+    "src/path_planning/src/motion_adapter.hpp",
+    "src/path_planning/src/output_contract.hpp",
+    "src/path_planning/src/path_planning.cpp",
+    "src/path_planning/msg/PolynomialSegment.msg",
+    "src/path_planning/msg/PlanResult.msg",
+    "src/path_planning/srv/PlanMotion.srv",
+    "src/path_planning/srv/SetGoal.srv",
+    "src/path_planning/launch/parameter_config.py",
+    "src/path_planning/launch/planner.launch.py",
+    "src/path_planning/launch/odin.launch.py",
+    "src/avoidance_bridge/src/avoidance_bridge.cpp",
+    "src/avoidance_bridge/launch/avoidance.launch.py"
+  ],
+  "ownership": "path_searching为GPLv3上游算法的改进文件；path_planning为ROS2移植与输出/目标实现；avoidance_bridge为机载任务及坐标接入。原算法及数学继承来源保留HKU-MARS/Fast-Planner版权与致谢，不将全部行数标为原创。",
+  "upstream_derived_files": [
+    "src/path_searching/include/path_searching/kinodynamic_astar.h",
+    "src/path_searching/src/kinodynamic_astar.cpp"
+  ],
+  "shared_dependencies_excluded": [
+    "src/guided_interfaces",
+    "src/correction_interfaces",
+    "src/avoidance_bridge/scripts/avoidance_backend_manager.py",
+    "src/avoidance_bridge/scripts/avoidance_backend_process.py"
+  ],
+  "excluded_from_listing": [
+    "test",
+    "scripts/demo.py",
+    "build.sh",
+    "setup.sh",
+    "run.sh",
+    "CMakeLists.txt",
+    "package.xml"
+  ],
+  "files": [
+    {
+      "path": "src/path_searching/include/path_searching/kinodynamic_astar.h",
+      "sha256": "8e0aa2b711f9e076e2307a2bf68ab76d75651cfe2a67e2c4356dd09c8f38a3f9",
+      "physical_lines": 213,
+      "scope": "GPLv3上游算法改进"
+    },
+    {
+      "path": "src/path_searching/src/kinodynamic_astar.cpp",
+      "sha256": "21b9c66cb511505585034d6d9393a8463f3633b49ae0abb039e76cbf62933fbf",
+      "physical_lines": 860,
+      "scope": "GPLv3上游算法改进"
+    },
+    {
+      "path": "src/path_planning/src/motion_adapter.hpp",
+      "sha256": "804bbd75512fca7dc54ba55d31f52c6c6e83d2e36c9546bf7b169271fc8b647b",
+      "physical_lines": 95,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/src/output_contract.hpp",
+      "sha256": "8702e345da9460c96bd126367d531deada90208d39b19f95c2fd40b682a106f7",
+      "physical_lines": 34,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/src/path_planning.cpp",
+      "sha256": "5d3791a3b711c8ed24449d68ee041712cfded316527acc20af87797cbbe1da78",
+      "physical_lines": 620,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/msg/PolynomialSegment.msg",
+      "sha256": "74f48fbfbdc439f31d40d032509e8f1f2dcbe26ce5185238f5bffa936e796933",
+      "physical_lines": 8,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/msg/PlanResult.msg",
+      "sha256": "a0b0f825f626301109fb384a7ab173ef01f9c5e9d34c9d1bcd2cbbae6f51de0f",
+      "physical_lines": 47,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/srv/PlanMotion.srv",
+      "sha256": "02da68c813a9973a334b410f612a1f5e96a1350abb12fd027767a7adcbe1dfa9",
+      "physical_lines": 18,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/srv/SetGoal.srv",
+      "sha256": "0b16a9eb44dd6da2a2b6c3d45c93de650b5ed74a52868bcf74985bb38528cb6f",
+      "physical_lines": 10,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/launch/parameter_config.py",
+      "sha256": "4ecaa537f35078bcd14449759fa0b06491919d26a064a3071024bb05f10a1234",
+      "physical_lines": 97,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/launch/planner.launch.py",
+      "sha256": "5b1d7e908f37c3d2e1a2d7d246423e0d27509ba984f533819577bc29f3e01b95",
+      "physical_lines": 38,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/path_planning/launch/odin.launch.py",
+      "sha256": "d4de88a74b4f25ff2cd3b66f5aea43d10eba9c3723ff78690d19487978bbe43a",
+      "physical_lines": 42,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/avoidance_bridge/src/avoidance_bridge.cpp",
+      "sha256": "b3e87977233e8aa4ddc1282dd4c4f3f92dbe075b6c86ab1dd3f9aab26953461e",
+      "physical_lines": 488,
+      "scope": "ROS2移植/新增接口或机载接入"
+    },
+    {
+      "path": "src/avoidance_bridge/launch/avoidance.launch.py",
+      "sha256": "f85e44dc87f6deaa958cc987da24d9d1531e5c775da5ef444b906f0deac93b04",
+      "physical_lines": 78,
+      "scope": "ROS2移植/新增接口或机载接入"
+    }
+  ]
+}

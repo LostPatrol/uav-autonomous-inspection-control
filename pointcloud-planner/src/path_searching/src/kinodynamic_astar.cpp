@@ -1,0 +1,860 @@
+// GPL-3.0: derived from HKU-MARS 9d25dd6; original search/math retained with documented fixes.
+#include <path_searching/kinodynamic_astar.h>
+#include <pcl/filters/voxel_grid.h>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+using namespace std;
+using namespace Eigen;
+
+namespace {
+// Implementation policy, not runtime tuning knobs. Keep algebraic factors (2, 3, 6, ...)
+// in the polynomial formulas below: those follow from differentiation, not empirical tuning.
+constexpr double kMaxGridCellsPerAxis = 1e8;  // Limit the configured spatial-index range.
+constexpr double kMaxSearchBudgetSeconds = 60.0;  // Reject accidentally unbounded search budgets.
+constexpr double kMaxPrimitiveCollisionChecks = 1e6;  // Cap configured work per primitive.
+constexpr double kNearGoalDistanceMeters = 1.0;  // Per-axis voxel tolerance for attempting a shot.
+constexpr int kInitialDurationCount = 20;  // Fixed count, independent of parameter magnitude.
+constexpr double kMinHeuristicTimeSeconds = 1e-3;  // Avoid singular cost at coincident endpoints.
+constexpr double kHeuristicVelocityFraction = 0.5;  // Upstream heuristic time lower-bound scale.
+constexpr double kInitialHeuristicCost = 100000000.0;  // Upstream finite sentinel; retain its behavior.
+constexpr double kAccelerationZeroTolerance = 1e-12;  // m/s²; skip division by near-zero primitive input.
+constexpr double kPolynomialZeroTolerance = 1e-12;  // SI coefficient magnitude for degenerate-root branches.
+constexpr double kDerivativeLimitSlack = 1e-9;  // Absolute numerical slack for velocity/acceleration limits.
+constexpr std::array<double, 5> kShotDurationScales{1.0, 1.5, 2.0, 3.0, 4.0};  // Bounded cubic retries.
+constexpr int kPrimitiveSubdivisionLimit = 14;  // Reject intervals still unproven at this depth.
+constexpr double kNearestDistanceSlack = 8 * std::numeric_limits<float>::epsilon();  // PCL distance rounding.
+}  // namespace
+
+void SearchConfig::validate() const {
+  if (!std::isfinite(vertical_distance_weight) || vertical_distance_weight < 0)
+    throw std::invalid_argument("vertical_distance_weight must be finite and nonnegative");
+  for (double v : {max_tau, init_max_tau, max_vel, max_acc, max_vel_xy, max_vel_z, max_acc_xy, max_acc_z, w_time, horizon, lambda_heu,
+                   resolution, time_resolution, safe_distance, voxel_size, collision_step, search_budget})
+    if (!std::isfinite(v) || v <= 0) throw std::invalid_argument("search parameters must be finite and positive");
+  // Check operations needed by the fixed lattice and double-integrator before search allocation.
+  // These are representability bounds, not arbitrary minimum accelerations or durations.
+  const double min_tau = init_max_tau * (1.0 / kInitialDurationCount);
+  if (max_acc / 2 == 0 || min_tau == 0 || min_tau * min_tau == 0 || max_tau * max_tau == 0 ||
+      !std::isfinite(max_tau * max_tau) || !std::isfinite(init_max_tau * init_max_tau) ||
+      !std::isfinite(3 * max_acc * max_acc) || !std::isfinite(1 / resolution) ||
+      !std::isfinite(1 / time_resolution) ||
+      !std::isfinite(max_acc * std::max(max_tau * max_tau, init_max_tau * init_max_tau)) ||
+      !std::isfinite(max_vel * std::max(max_tau, init_max_tau)))
+    throw std::invalid_argument("search parameters exceed representable acceleration, duration or index range");
+  if (allocate_num < 2 || tree_period < 1 || max_cloud_points < 1 || !lower.allFinite() || !upper.allFinite() ||
+      (lower.array() >= upper.array()).any() || ((upper-lower).array()/resolution > kMaxGridCellsPerAxis).any() ||
+      collision_step > safe_distance || search_budget > kMaxSearchBudgetSeconds ||
+      std::max(max_tau, init_max_tau)*std::sqrt(3.0)*max_vel/collision_step > kMaxPrimitiveCollisionChecks)
+    throw std::invalid_argument("invalid map bounds, capacities, sampling step or search budget");
+}
+
+KinodynamicAstar::KinodynamicAstar(const SearchConfig& c) : config_(c) {
+  c.validate();
+  max_tau_=c.max_tau; init_max_tau_=c.init_max_tau; max_vel_=c.max_vel; max_acc_=c.max_acc;
+  w_time_=c.w_time; horizon_=c.horizon; lambda_heu_=c.lambda_heu; allocate_num_=c.allocate_num;
+  resolution_=c.resolution; inv_resolution_=1/c.resolution;
+  time_resolution_=c.time_resolution; inv_time_resolution_=1/c.time_resolution; origin_=c.lower;
+  path_node_pool_.reserve(allocate_num_);
+  for (int i=0; i<allocate_num_; ++i) path_node_pool_.push_back(new PathNode);
+  clearMap();
+}
+KinodynamicAstar::~KinodynamicAstar() { for (auto node : path_node_pool_) delete node; }
+
+void KinodynamicAstar::reset() {
+  expanded_nodes_.clear(); path_nodes_.clear(); open_set_ = decltype(open_set_){};
+  for (int i=0; i<use_node_num_; ++i) *path_node_pool_[i] = PathNode{};
+  use_node_num_=0; iter_num_=0; is_shot_succ_=false; t_shot_=0;
+}
+void KinodynamicAstar::clearMap() {
+  for (std::size_t i=0; i<2; ++i) {
+    trees_[i] = pcl::search::KdTree<pcl::PointXYZ>();
+    clouds_[i].reset(new pcl::PointCloud<pcl::PointXYZ>);
+  }
+  cloud_input_num_=0; map_ready_=false;
+  reset();
+}
+std::size_t KinodynamicAstar::mapPointCount() const { return clouds_[0]->size()+clouds_[1]->size(); }
+
+// Preserve the two alternating, frame-accumulated trees; each bank lasts at most two periods.
+bool KinodynamicAstar::setKdtree(const pcl::PointCloud<pcl::PointXYZ>& input) {
+  if (input.empty() || input.size() > config_.max_cloud_points) { clearMap(); return false; }
+  for (const auto& p : input)
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) { clearMap(); return false; }
+  const auto bank = (cloud_input_num_/config_.tree_period)%2;
+  auto next = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  if (cloud_input_num_%config_.tree_period != 0) *next = *clouds_[bank];
+  *next += input;
+  pcl::VoxelGrid<pcl::PointXYZ> filter;
+  filter.setInputCloud(next);
+  filter.setLeafSize(config_.voxel_size, config_.voxel_size, config_.voxel_size);
+  auto filtered = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  filter.filter(*filtered);
+  if (filtered->empty() || filtered->size()+clouds_[1-bank]->size() > config_.max_cloud_points) {
+    clearMap(); return false;
+  }
+  clouds_[bank] = filtered; trees_[bank].setInputCloud(filtered);
+  ++cloud_input_num_; map_ready_=true;
+  return true;
+}
+bool KinodynamicAstar::inBounds(const Eigen::Vector3d& p) const {
+  return p.allFinite() && (p.array() >= config_.lower.array()).all() && (p.array() <= config_.upper.array()).all();
+}
+bool KinodynamicAstar::isSafe(double x, double y, double z) {
+  if (!map_ready_ || !inBounds({x,y,z})) return false;
+  // Match upstream SAFE_DIST: compare against stored voxel centroids, without extra inflation.
+  const double radius = config_.safe_distance;
+  for (std::size_t i=0; i<2; ++i) {
+    if (clouds_[i]->empty()) continue;
+    if (trees_[i].nearestKSearch(pcl::PointXYZ(x,y,z), 1, nearest_indices_, nearest_distances_) != 1 ||
+        nearest_distances_[0] < radius*radius) return false;
+  }
+  return true;
+}
+
+// Conservative nearest-distance bound for primitive certificates; public isSafe stays unchanged.
+double KinodynamicAstar::primitiveClearance(const Eigen::Vector3d& position) {
+  if (!map_ready_ || !inBounds(position)) return 0;
+  const pcl::PointXYZ query(position.x(), position.y(), position.z());
+  const double query_error = (position - Eigen::Vector3d(query.x, query.y, query.z)).norm();
+  double distance = std::numeric_limits<double>::infinity();
+  for (std::size_t bank = 0; bank < 2; ++bank) {
+    if (clouds_[bank]->empty()) continue;
+    if (trees_[bank].nearestKSearch(query, 1, nearest_indices_, nearest_distances_) != 1) return 0;
+    distance = std::min(distance, std::sqrt(static_cast<double>(nearest_distances_[0])) *
+                                 (1 - kNearestDistanceSlack) - query_error);
+    if (distance < config_.safe_distance) break;
+  }
+  return distance;
+}
+
+// Endpoint distance margins cover the arc-length bound; otherwise certify both temporal halves.
+bool KinodynamicAstar::isPrimitiveSafe(const Eigen::Matrix<double, 6, 1>& state,
+    const Eigen::Vector3d& acceleration, double begin, double end, double da, double db, int depth) {
+  if (std::chrono::steady_clock::now() >= deadline_) return false;
+  if (da < config_.safe_distance || db < config_.safe_distance) return false;
+  const auto velocity = state.tail(3);
+  // The norm of affine velocity is convex, so its trapezoidal integral bounds travelled length.
+  const double length_bound = (end - begin) * 0.5 * ((velocity + acceleration * begin).norm() +
+                                                   (velocity + acceleration * end).norm());
+  if (da + db >= 2 * config_.safe_distance + length_bound) return true;
+  if (depth >= kPrimitiveSubdivisionLimit) return false;
+  const double mid = (begin + end) * 0.5;
+  const Eigen::Vector3d position = state.head(3) + velocity * mid + 0.5 * acceleration * mid * mid;
+  const double dm = primitiveClearance(position);
+  if (dm < config_.safe_distance) return false;
+  return isPrimitiveSafe(state, acceleration, begin, mid, da, dm, depth + 1) &&
+         isPrimitiveSafe(state, acceleration, mid, end, dm, db, depth + 1);
+}
+
+// Weighted A*: validate endpoints, expand constant-acceleration primitives, then try a terminal cubic.
+// Map updates must not run concurrently; all collision queries use the current two-bank snapshot.
+int KinodynamicAstar::search(Eigen::Vector3d start_pt, Eigen::Vector3d start_v, Eigen::Vector3d start_a,
+                             Eigen::Vector3d end_pt, Eigen::Vector3d end_v, bool init, bool dynamic, double time_start)
+{
+
+  
+  reset();
+  deadline_ = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(config_.search_budget));
+  if (!start_pt.allFinite() || !start_v.allFinite() || !start_a.allFinite() ||
+      !end_pt.allFinite() || !end_v.allFinite() || !std::isfinite(time_start) ||
+      !inBounds(start_pt) || !inBounds(end_pt) ||
+      end_v.cwiseAbs().maxCoeff()>max_vel_ ||
+      start_a.cwiseAbs().maxCoeff()>max_acc_ ||
+      !withinVelocity(end_v) || !withinAcceleration(start_a)) return INVALID_INPUT;
+  if (!map_ready_) return NO_MAP;
+  if (!isSafe(start_pt.x(), start_pt.y(), start_pt.z()) ||
+      !isSafe(end_pt.x(), end_pt.y(), end_pt.z())) return NO_PATH;
+  time_origin_ = time_start;
+  start_vel_ = start_v;
+  start_acc_ = start_a;
+
+  PathNodePtr cur_node = path_node_pool_[0];
+  *cur_node = PathNode{};
+  cur_node->time = time_start;
+  cur_node->parent = NULL;
+  cur_node->state.head(3) = start_pt;
+  cur_node->state.tail(3) = start_v;
+  cur_node->index = posToIndex(start_pt);
+  cur_node->g_score = 0.0;
+
+  Eigen::VectorXd end_state(6);
+  Eigen::Vector3i end_index;
+  double time_to_goal;
+
+  end_state.head(3) = end_pt;
+  end_state.tail(3) = end_v;
+  end_index = posToIndex(end_pt);
+  cur_node->f_score = lambda_heu_ * estimateHeuristic(cur_node->state, end_state, time_to_goal);
+  cur_node->node_state = IN_OPEN_SET;
+  open_set_.push({cur_node->f_score, cur_node});
+  use_node_num_ += 1;
+
+  if (dynamic)
+  {
+    time_origin_ = time_start;
+    cur_node->time = time_start;
+    cur_node->time_idx = timeToIndex(time_start);
+    expanded_nodes_.insert(cur_node->index, cur_node->time_idx, cur_node);
+  }
+  else
+    expanded_nodes_.insert(cur_node->index, cur_node);
+
+  PathNodePtr terminate_node = NULL;
+  // Keep a checked complete candidate while weighted A* considers cheaper frontier entries.
+  PathNodePtr best_terminal = nullptr;
+  Eigen::Matrix<double, 3, 4> best_shot;
+  double best_duration = 0.0, best_cost = std::numeric_limits<double>::infinity();
+  const bool prefer_horizontal = config_.vertical_distance_weight > 0;
+  // Restore an owning coefficient copy; subsequent shot attempts overwrite the core's scratch.
+  const auto finish = [&](int failure) {
+    if (best_terminal) {
+      retrievePath(best_terminal);
+      coef_shot_ = best_shot; t_shot_ = best_duration; is_shot_succ_ = true;
+      return int(REACH_END);
+    }
+    reset();
+    return failure;
+  };
+  bool init_search = init;
+  const int tolerance = ceil(kNearGoalDistanceMeters / resolution_);
+
+  while (!open_set_.empty())
+  {
+    if (std::chrono::steady_clock::now() >= deadline_) return finish(TIMEOUT);
+    // A decreased score creates another queue entry; discard old snapshots before expanding.
+    const auto entry = open_set_.top();
+    cur_node = entry.node;
+    if (cur_node->node_state != IN_OPEN_SET || entry.score != cur_node->f_score) {
+      open_set_.pop();
+      continue;
+    }
+    if (best_terminal && entry.score >= best_cost) return finish(REACH_END);
+    bool reach_horizon = (cur_node->state.head(3) - start_pt).norm() >= horizon_;
+    // An overspeed measured root must brake before a nominal-envelope terminal shot.
+    bool near_end = withinVelocity(cur_node->state.tail(3)) &&
+                    abs(cur_node->index(0) - end_index(0)) <= tolerance &&
+                    abs(cur_node->index(1) - end_index(1)) <= tolerance &&
+                    abs(cur_node->index(2) - end_index(2)) <= tolerance;
+
+    // A horizon result is a useful local prefix, not proof of reaching or stopping at the goal.
+    if (reach_horizon || near_end)
+    {
+      terminate_node = cur_node;
+      retrievePath(terminate_node);
+      if (near_end)
+      {
+        estimateHeuristic(cur_node->state, end_state, time_to_goal);
+        // The upstream heuristic time ignores derivative constraints. Retry the same cubic
+        // boundary-value connection at longer durations, never accept an over-limit shot.
+        is_shot_succ_ = false;
+        for (double scale : kShotDurationScales) {
+          if (computeShotTraj(cur_node->state, end_state, time_to_goal * scale)) {
+            if (!prefer_horizontal) break;
+            const double cost = cur_node->g_score + shotCost();
+            if (cost < best_cost) {
+              best_terminal = cur_node; best_shot = coef_shot_;
+              best_duration = t_shot_; best_cost = cost;
+            }
+          }
+          if (std::chrono::steady_clock::now() >= deadline_) break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline_) return finish(TIMEOUT);
+      }
+
+    }
+    if (reach_horizon)
+    {
+      if (best_terminal) return finish(REACH_END);
+      if (is_shot_succ_ && !prefer_horizontal)
+      {
+        return REACH_END;
+      }
+      else
+      {
+        return REACH_HORIZON;
+      }
+    }
+
+    if (near_end)
+    {
+      if (is_shot_succ_ && !prefer_horizontal)
+      {
+        return REACH_END;
+      }
+    }
+    // A rejected near-goal shot must not leave a candidate path visible as a successful result.
+    path_nodes_.clear();
+    is_shot_succ_ = false;
+    open_set_.pop();
+    cur_node->node_state = IN_CLOSE_SET;
+    iter_num_ += 1;
+
+    Eigen::Matrix<double, 6, 1> cur_state = cur_node->state;
+    const double primitive_start_distance = primitiveClearance(cur_state.head(3));
+    Eigen::Matrix<double, 6, 1> pro_state;
+    vector<PathNodePtr> tmp_expand_nodes;
+    Eigen::Vector3d um;
+    double pro_t;
+    vector<Eigen::Vector3d> inputs;
+    vector<double> durations;
+    inputs.reserve(init_search ? 1 : 150);
+    durations.reserve(init_search ? kInitialDurationCount : 1);
+    // Initial mode preserves supplied acceleration only for this first expansion.
+    // Preserve five samples per axis; a narrow Z axis may also need exact stopping input.
+    const bool recovering_root=cur_node->parent==nullptr && !withinVelocity(cur_state.tail(3));
+    const bool initial_expansion=init_search || recovering_root;
+    if (recovering_root)
+    {
+      // Keep the measured velocity. A bounded first primitive monotonically brakes each
+      // overspeed component to the nominal envelope; all later segments use normal limits.
+      Eigen::Vector3d recovered=cur_state.tail(3).cwiseMax(-max_vel_).cwiseMin(max_vel_);
+      if (recovered.head<2>().norm()>config_.max_vel_xy)
+        recovered.head<2>()*=config_.max_vel_xy/recovered.head<2>().norm();
+      recovered.z()=std::clamp(recovered.z(),-config_.max_vel_z,config_.max_vel_z);
+      const Eigen::Vector3d change=recovered-cur_state.tail(3);
+      const double duration=std::max({change.head<2>().norm()/config_.max_acc_xy,
+          std::abs(change.z())/config_.max_acc_z,change.cwiseAbs().maxCoeff()/max_acc_});
+      if (!std::isfinite(duration) || duration<=0) return finish(INVALID_INPUT);
+      inputs.push_back(change/duration);
+      durations.push_back(duration);
+      init_search=false;
+    }
+    else if (init_search)
+    {
+      inputs.push_back(start_acc_);
+      for (int i = 1; i <= kInitialDurationCount; ++i)
+        durations.push_back(init_max_tau_ * (double(i) / kInitialDurationCount));
+      init_search = false;
+    }
+    else
+    {
+      std::array<std::array<double, 6>, 3> axes;
+      std::array<std::size_t, 3> counts{5,5,5};
+      for (int axis=0; axis<3; ++axis) {
+        const double acceleration=std::min(max_acc_,axis==2?config_.max_acc_z:config_.max_acc_xy);
+        const double velocity=std::min(max_vel_,axis==2?config_.max_vel_z:config_.max_vel_xy);
+        axes[axis]={-acceleration,-acceleration/2,0,acceleration/2,acceleration};
+        // Preserve the original lattice unless even half acceleration from rest exceeds
+        // the speed cap. Such narrow axes need feasible samples to retain nonzero controls.
+        if (acceleration*max_tau_/2<=velocity) continue;
+        const double negative=std::min(acceleration,std::max(0.0,(velocity+cur_state(axis+3))/max_tau_));
+        const double positive=std::min(acceleration,std::max(0.0,(velocity-cur_state(axis+3))/max_tau_));
+        axes[axis]={-negative,-negative/2,0,positive/2,positive};
+        // Small vertical drift cannot stop exactly on the five signed acceleration samples.
+        // Retain those controls and add the bounded zero-terminal-velocity candidate only for Z.
+        const double stop=-cur_state(axis+3)/max_tau_;
+        if (axis==2 && std::abs(stop)<=acceleration &&
+            std::none_of(axes[axis].begin(),axes[axis].begin()+counts[axis],
+                [&](double value) { return std::abs(value-stop)<kAccelerationZeroTolerance; })) {
+          axes[axis][counts[axis]++]=stop;
+        }
+      }
+      for (std::size_t ix=0; ix<counts[0]; ++ix)
+        for (std::size_t iy=0; iy<counts[1]; ++iy)
+          for (std::size_t iz=0; iz<counts[2]; ++iz)
+          {
+            um << axes[0][ix], axes[1][iy], axes[2][iz];
+            inputs.push_back(um);
+          }
+      durations.push_back(max_tau_);
+    }
+    for (std::size_t i = 0; i < inputs.size(); ++i)
+      for (std::size_t j = 0; j < durations.size(); ++j)
+      {
+        um = inputs[i];
+        if (std::chrono::steady_clock::now() >= deadline_) return finish(TIMEOUT);
+        if (!um.allFinite() || !withinAcceleration(um)) continue;
+        double tau = durations[j];
+        stateTransit(cur_state, pro_state, um, tau);
+        pro_t = cur_node->time + tau;
+        if (!pro_state.allFinite()) continue;
+        // A finite absolute origin can still lose a duration or overflow the relative int hash.
+        if (dynamic && (!std::isfinite(pro_t) || pro_t <= cur_node->time ||
+            !std::isfinite((pro_t - time_origin_) * inv_time_resolution_) ||
+            (pro_t - time_origin_) * inv_time_resolution_ > std::numeric_limits<int>::max())) {
+          reset(); return INVALID_INPUT;
+        }
+
+        Eigen::Vector3d pro_pos = pro_state.head(3);
+        if (!inBounds(pro_pos)) continue;
+        // Endpoint checks alone miss a quadratic primitive that exits and returns inside the bounds.
+        bool leaves_bounds = false;
+        for (int axis=0; axis<3; ++axis) {
+          if (std::abs(um(axis)) < kAccelerationZeroTolerance) continue;
+          const double t = -cur_state(axis+3)/um(axis);
+          if (t>0 && t<tau) {
+            const double p = cur_state(axis)+cur_state(axis+3)*t+0.5*um(axis)*t*t;
+            leaves_bounds |= p<config_.lower(axis) || p>config_.upper(axis);
+          }
+        }
+        if (leaves_bounds) continue;
+        Eigen::Vector3i pro_id = posToIndex(pro_pos);
+
+        int pro_t_id = dynamic ? timeToIndex(pro_t) : 0;
+        // Short coasts or bounded recovery may stay in the root cell before free acceleration.
+        // Keep these first-step candidates outside the hash instead of merging with the closed root.
+        const bool initial_same_cell=initial_expansion && !dynamic && pro_id==cur_node->index;
+        PathNodePtr pro_node = initial_same_cell ? nullptr :
+            (dynamic ? expanded_nodes_.find(pro_id, pro_t_id) : expanded_nodes_.find(pro_id));
+        if (pro_node != NULL && pro_node->node_state == IN_CLOSE_SET)
+        {
+            continue;
+        }
+        Eigen::Vector3d pro_v = pro_state.tail(3);
+        if (!withinVelocity(pro_v))
+        {
+            continue;
+        }
+        Eigen::Vector3i diff = pro_id - cur_node->index;
+        int diff_time = pro_t_id - cur_node->time_idx;
+        if (!initial_same_cell && diff.norm() == 0 && ((!dynamic) || diff_time == 0))
+        {
+            continue;
+        }
+        // Reuse this node's clearance across candidates; query only unproven intervals.
+        if (!isPrimitiveSafe(cur_state, um, 0, tau, primitive_start_distance,
+                             primitiveClearance(pro_pos)))
+        {
+            if (std::chrono::steady_clock::now() >= deadline_) return finish(TIMEOUT);
+            continue;
+        }
+
+        // Accumulated control-effort/time cost plus the weighted upstream terminal-cost heuristic.
+        double time_to_goal, tmp_g_score, tmp_f_score;
+        tmp_g_score = (um.squaredNorm() + w_time_) * tau + cur_node->g_score;
+        if (prefer_horizontal)
+          tmp_g_score += config_.vertical_distance_weight *
+              verticalTravel({cur_state(5), 0.5 * um.z(), 0.0}, tau);
+        tmp_f_score = tmp_g_score + lambda_heu_ * estimateHeuristic(pro_state, end_state, time_to_goal);
+        bool prune = false;
+        for (std::size_t j = 0; j < tmp_expand_nodes.size(); ++j)
+        {
+          PathNodePtr expand_node = tmp_expand_nodes[j];
+          if ((pro_id - expand_node->index).norm() == 0 && ((!dynamic) || pro_t_id == expand_node->time_idx))
+          {
+            prune = true;
+            if (tmp_f_score < expand_node->f_score)
+            {
+              expand_node->f_score = tmp_f_score;
+              expand_node->g_score = tmp_g_score;
+              expand_node->state = pro_state;
+              expand_node->input = um;
+              expand_node->duration = tau;
+              open_set_.push({expand_node->f_score, expand_node});
+              if (dynamic)
+                expand_node->time = cur_node->time + tau;
+            }
+            break;
+          }
+        }
+        if (!prune)
+        {
+          if (pro_node == NULL)
+          {
+            if (use_node_num_ >= allocate_num_) return finish(NODE_LIMIT);
+            pro_node = path_node_pool_[use_node_num_];
+            pro_node->index = pro_id;
+            pro_node->state = pro_state;
+            pro_node->f_score = tmp_f_score;
+            pro_node->g_score = tmp_g_score;
+            pro_node->input = um;
+            pro_node->duration = tau;
+            pro_node->parent = cur_node;
+            pro_node->node_state = IN_OPEN_SET;
+            if (dynamic)
+            {
+              pro_node->time = cur_node->time + tau;
+              pro_node->time_idx = timeToIndex(pro_node->time);
+            }
+            open_set_.push({pro_node->f_score, pro_node});
+
+            if (dynamic)
+              expanded_nodes_.insert(pro_id, pro_node->time_idx, pro_node);
+            else if (!initial_same_cell)
+              expanded_nodes_.insert(pro_id, pro_node);
+
+            if (!initial_same_cell) tmp_expand_nodes.push_back(pro_node);
+
+            use_node_num_ += 1;
+
+          }
+          else if (pro_node->node_state == IN_OPEN_SET)
+          {
+            if (tmp_g_score < pro_node->g_score)
+            {
+              pro_node->state = pro_state;
+              pro_node->f_score = tmp_f_score;
+              pro_node->g_score = tmp_g_score;
+              pro_node->input = um;
+              pro_node->duration = tau;
+              pro_node->parent = cur_node;
+              open_set_.push({pro_node->f_score, pro_node});
+              if (dynamic)
+                pro_node->time = cur_node->time + tau;
+            }
+          }
+        }
+      }
+  }
+  return finish(NO_PATH);
+}
+
+// Parent links run backwards; expose an ordered start-to-terminal sequence without copying nodes.
+void KinodynamicAstar::retrievePath(PathNodePtr end_node)
+{
+  PathNodePtr cur_node = end_node;
+  path_nodes_.clear();
+  path_nodes_.push_back(cur_node);
+
+
+  while (cur_node->parent != NULL)
+  {
+    cur_node = cur_node->parent;
+    path_nodes_.push_back(cur_node);
+
+
+  }
+
+  reverse(path_nodes_.begin(), path_nodes_.end());
+}
+
+// Estimate cubic connection cost using directional speed-based candidate durations.
+// The half-speed time floor is not an admissible bound; computeShotTraj validates feasibility.
+double KinodynamicAstar::estimateHeuristic(Eigen::VectorXd x1, Eigen::VectorXd x2, double& optimal_time)
+{
+  const Vector3d dp = x2.head(3) - x1.head(3);
+  const Vector3d v0 = x1.segment(3, 3);
+  const Vector3d v1 = x2.segment(3, 3);
+
+  double c1 = -36 * dp.dot(dp);
+  double c2 = 24 * (v0 + v1).dot(dp);
+  double c3 = -4 * (v0.dot(v0) + v0.dot(v1) + v1.dot(v1));
+  double c4 = 0;
+  double c5 = w_time_;
+
+  std::vector<double> ts = quartic(c5, c4, c3, c2, c1);
+
+  const double horizontal=std::min(max_vel_,config_.max_vel_xy)*kHeuristicVelocityFraction;
+  const double vertical=std::min(max_vel_,config_.max_vel_z)*kHeuristicVelocityFraction;
+  double t_bar = std::max({kMinHeuristicTimeSeconds, dp.head<2>().norm()/horizontal, std::abs(dp.z())/vertical});
+  ts.push_back(t_bar);
+
+  double cost = kInitialHeuristicCost;
+  double t_d = t_bar;
+
+  for (auto t : ts)
+  {
+    if (!std::isfinite(t) || t < t_bar)
+      continue;
+    double c = -c1 / (3 * t * t * t) - c2 / (2 * t * t) - c3 / t + w_time_ * t;
+    if (c < cost)
+    {
+      cost = c;
+      t_d = t;
+    }
+  }
+
+  optimal_time = t_d;
+
+  double heuristic = tie_breaker_ * cost;
+  // Temporarily disabled: weighted endpoint-height attraction caused repeated vertical reversals.
+  // heuristic += config_.vertical_distance_weight * std::abs(dp.z());
+  return heuristic;
+}
+
+// Integrate |vz| analytically by summing displacement between its zero crossings.
+double KinodynamicAstar::verticalTravel(const Eigen::Vector3d& c, double duration) {
+  const auto displacement = [&](double t) { return ((c.z() * t + c.y()) * t + c.x()) * t; };
+  if (c.z() == 0.0) {
+    const double end = displacement(duration);
+    const double stop = c.y() != 0.0 ? -c.x() / (2 * c.y()) : -1.0;
+    if (stop > 0.0 && stop < duration) {
+      const double turn = displacement(stop);
+      return std::abs(turn) + std::abs(end - turn);
+    }
+    return std::abs(end);
+  }
+  auto turns = cubic(0.0, 3 * c.z() * duration * duration, 2 * c.y() * duration, c.x());
+  turns.push_back(1.0);
+  std::sort(turns.begin(), turns.end());
+  double travel = 0.0, previous = 0.0;
+  for (double u : turns) {
+    if (u <= 0.0 || u > 1.0) continue;
+    const double position = displacement(u * duration);
+    travel += std::abs(position - previous);
+    previous = position;
+  }
+  return travel;
+}
+
+// Acceleration is affine, so its squared norm has an exact endpoint integral.
+double KinodynamicAstar::shotCost() {
+  const Eigen::Vector3d first = 2 * coef_shot_.col(2);
+  const Eigen::Vector3d last = first + 6 * coef_shot_.col(3) * t_shot_;
+  return t_shot_ * ((first.squaredNorm() + first.dot(last) + last.squaredNorm()) / 3 + w_time_) +
+      config_.vertical_distance_weight * verticalTravel(coef_shot_.row(2).tail<3>().transpose(), t_shot_);
+}
+
+// Linear primitive velocity has a convex norm, so endpoint checks cover its entire duration.
+bool KinodynamicAstar::withinVelocity(const Eigen::Vector3d& value) const {
+  return value.cwiseAbs().maxCoeff()<=max_vel_+kDerivativeLimitSlack &&
+      value.head<2>().norm()<=config_.max_vel_xy+kDerivativeLimitSlack &&
+      std::abs(value.z())<=config_.max_vel_z+kDerivativeLimitSlack;
+}
+
+// Constant primitive or linear shot acceleration is bounded by its endpoint norms.
+bool KinodynamicAstar::withinAcceleration(const Eigen::Vector3d& value) const {
+  return value.cwiseAbs().maxCoeff()<=max_acc_+kDerivativeLimitSlack &&
+      value.head<2>().norm()<=config_.max_acc_xy+kDerivativeLimitSlack &&
+      std::abs(value.z())<=config_.max_acc_z+kDerivativeLimitSlack;
+}
+
+// Solve cubic coefficients from endpoint position/velocity. Only a fully checked shot is retained.
+bool KinodynamicAstar::computeShotTraj(Eigen::VectorXd state1, Eigen::VectorXd state2, double time_to_goal)
+{
+  /* ---------- get coefficient ---------- */
+  const Vector3d p0 = state1.head(3);
+  const Vector3d dp = state2.head(3) - p0;
+  const Vector3d v0 = state1.segment(3, 3);
+  const Vector3d v1 = state2.segment(3, 3);
+  const Vector3d dv = v1 - v0;
+  double t_d = time_to_goal;
+  if (!std::isfinite(t_d) || t_d <= 0) return false;
+  MatrixXd coef(3, 4);
+  end_vel_ = v1;
+
+  Vector3d a = 1.0 / 6.0 * (-12.0 / (t_d * t_d * t_d) * (dp - v0 * t_d) + 6 / (t_d * t_d) * dv);
+  Vector3d b = 0.5 * (6.0 / (t_d * t_d) * (dp - v0 * t_d) - 2 / t_d * dv);
+  Vector3d c = v0;
+  Vector3d d = p0;
+  coef.col(3) = a, coef.col(2) = b, coef.col(1) = c, coef.col(0) = d;
+
+  if (!coef.allFinite()) return false;
+  if (!withinAcceleration(2*b) || !withinAcceleration(2*b+6*a*t_d)) return false;
+  // Horizontal speed extrema solve d(||v_xy||²)/dt=0, a cubic.
+  // Normalize time to [0,1] so root degeneracy is independent of curve duration.
+  const Eigen::Vector2d q0=c.head<2>(), q1=2*b.head<2>()*t_d, q2=3*a.head<2>()*t_d*t_d;
+  auto speed_times=cubic(2*q2.squaredNorm(), 3*q1.dot(q2),
+                         q1.squaredNorm()+2*q0.dot(q2), q0.dot(q1));
+  speed_times.push_back(0); speed_times.push_back(1);
+  for (double u:speed_times) {
+    if (u>=0 && u<=1 && !withinVelocity(c+2*b*(u*t_d)+3*a*(u*t_d)*(u*t_d))) return false;
+  }
+  // Vertical/per-axis velocity and position extrema remain analytic.
+  for (int axis = 0; axis < 3; ++axis) {
+    const auto position = [&](double t) { return d(axis) + c(axis)*t + b(axis)*t*t + a(axis)*t*t*t; };
+    const auto velocity = [&](double t) { return c(axis) + 2*b(axis)*t + 3*a(axis)*t*t; };
+    if (std::max(std::abs(2*b(axis)), std::abs(2*b(axis)+6*a(axis)*t_d)) > max_acc_ + kDerivativeLimitSlack)
+      return false;
+    std::vector<double> velocity_times{0.0, t_d};
+    if (std::abs(a(axis)) > kPolynomialZeroTolerance) velocity_times.push_back(-b(axis)/(3*a(axis)));
+    for (double t : velocity_times)
+      if (t >= 0 && t <= t_d && std::abs(velocity(t)) > std::min(max_vel_,axis==2?config_.max_vel_z:config_.max_vel_xy) + kDerivativeLimitSlack) return false;
+    std::vector<double> position_times{0.0, t_d};
+    if (std::abs(a(axis)) > kPolynomialZeroTolerance) {
+      const double disc = 4*b(axis)*b(axis)-12*a(axis)*c(axis);
+      if (disc >= 0) {
+        position_times.push_back((-2*b(axis)+std::sqrt(disc))/(6*a(axis)));
+        position_times.push_back((-2*b(axis)-std::sqrt(disc))/(6*a(axis)));
+      }
+    } else if (std::abs(b(axis)) > kPolynomialZeroTolerance) position_times.push_back(-c(axis)/(2*b(axis)));
+    for (double t : position_times)
+      if (t >= 0 && t <= t_d && (position(t) < config_.lower(axis) || position(t) > config_.upper(axis)))
+        return false;
+  }
+  const double check_count = std::ceil(t_d * std::hypot(config_.max_vel_xy,config_.max_vel_z) / config_.collision_step);
+  // A heuristic shot can be much longer than a configured primitive; avoid undefined int casts.
+  if (!coef.allFinite() || !std::isfinite(check_count) || check_count >= std::numeric_limits<int>::max())
+    return false;
+  const int checks = std::max(1, static_cast<int>(check_count));
+  for (int i = 0; i <= checks; ++i) {
+    if (std::chrono::steady_clock::now() >= deadline_) return false;
+    const double t = t_d * i / checks;
+    const Vector3d p = d + c*t + b*t*t + a*t*t*t;
+    if (!isSafe(p.x(), p.y(), p.z())) return false;
+  }
+  coef_shot_ = coef;
+  t_shot_ = t_d;
+  is_shot_succ_ = true;
+  return true;
+}
+
+// Real polynomial roots; reduced-degree branches also support horizontal speed extrema.
+vector<double> KinodynamicAstar::cubic(double a, double b, double c, double d)
+{
+  vector<double> dts;
+  if (std::abs(a)<kPolynomialZeroTolerance) {
+    if (std::abs(b)<kPolynomialZeroTolerance) {
+      if (std::abs(c)>=kPolynomialZeroTolerance) dts.push_back(-d/c);
+    } else {
+      const double discriminant=c*c-4*b*d;
+      if (discriminant>=0) {
+        dts.push_back((-c+std::sqrt(discriminant))/(2*b));
+        dts.push_back((-c-std::sqrt(discriminant))/(2*b));
+      }
+    }
+    return dts;
+  }
+  double a2 = b / a;
+  double a1 = c / a;
+  double a0 = d / a;
+
+  double Q = (3 * a1 - a2 * a2) / 9;
+  double R = (9 * a1 * a2 - 27 * a0 - 2 * a2 * a2 * a2) / 54;
+  double D = Q * Q * Q + R * R;
+  if (D > 0)
+  {
+    double S = std::cbrt(R + sqrt(D));
+    double T = std::cbrt(R - sqrt(D));
+    dts.push_back(-a2 / 3 + (S + T));
+    return dts;
+  }
+  else if (D == 0)
+  {
+    double S = std::cbrt(R);
+    dts.push_back(-a2 / 3 + S + S);
+    dts.push_back(-a2 / 3 - S);
+    return dts;
+  }
+  else
+  {
+    double theta = acos(std::clamp(R / sqrt(-Q * Q * Q), -1.0, 1.0));
+    dts.push_back(2 * sqrt(-Q) * cos(theta / 3) - a2 / 3);
+    dts.push_back(2 * sqrt(-Q) * cos((theta + 2 * M_PI) / 3) - a2 / 3);
+    dts.push_back(2 * sqrt(-Q) * cos((theta + 4 * M_PI) / 3) - a2 / 3);
+    return dts;
+  }
+}
+
+// Upstream quartic solver for stationary points of the heuristic cost; a=w_time_>0.
+// The heuristic also tests a positive fallback duration and filters nonfinite candidates.
+vector<double> KinodynamicAstar::quartic(double a, double b, double c, double d, double e)
+{
+  vector<double> dts;
+
+  double a3 = b / a;
+  double a2 = c / a;
+  double a1 = d / a;
+  double a0 = e / a;
+
+  vector<double> ys = cubic(1, -a2, a1 * a3 - 4 * a0, 4 * a2 * a0 - a1 * a1 - a3 * a3 * a0);
+  double y1 = ys.front();
+  double r = a3 * a3 / 4 - a2 + y1;
+  if (r < 0)
+    return dts;
+
+  double R = sqrt(r);
+  double D, E;
+  if (R != 0)
+  {
+    D = sqrt(0.75 * a3 * a3 - R * R - 2 * a2 + 0.25 * (4 * a3 * a2 - 8 * a1 - a3 * a3 * a3) / R);
+    E = sqrt(0.75 * a3 * a3 - R * R - 2 * a2 - 0.25 * (4 * a3 * a2 - 8 * a1 - a3 * a3 * a3) / R);
+  }
+  else
+  {
+    D = sqrt(0.75 * a3 * a3 - 2 * a2 + 2 * sqrt(y1 * y1 - 4 * a0));
+    E = sqrt(0.75 * a3 * a3 - 2 * a2 - 2 * sqrt(y1 * y1 - 4 * a0));
+  }
+
+  if (!std::isnan(D))
+  {
+    dts.push_back(-a3 / 4 + R / 2 + D / 2);
+    dts.push_back(-a3 / 4 + R / 2 - D / 2);
+  }
+  if (!std::isnan(E))
+  {
+    dts.push_back(-a3 / 4 - R / 2 + E / 2);
+    dts.push_back(-a3 / 4 - R / 2 - E / 2);
+  }
+
+  return dts;
+}
+
+Eigen::Vector3i KinodynamicAstar::posToIndex(Eigen::Vector3d pt)
+{
+  Vector3i idx = ((pt - origin_) * inv_resolution_).array().floor().cast<int>();
+
+  return idx;
+}
+
+int KinodynamicAstar::timeToIndex(double time)
+{
+  return static_cast<int>(std::floor((time - time_origin_) * inv_time_resolution_));
+}
+
+// Exact double-integrator step: p1=p0+v0*t+u*t²/2, v1=v0+u*t.
+void KinodynamicAstar::stateTransit(Eigen::Matrix<double, 6, 1>& state0, Eigen::Matrix<double, 6, 1>& state1,
+                                    Eigen::Vector3d um, double tau)
+{
+  for (int i = 0; i < 3; ++i)
+    phi_(i, i + 3) = tau;
+
+  Eigen::Matrix<double, 6, 1> integral;
+  integral.head(3) = 0.5 * pow(tau, 2) * um;
+  integral.tail(3) = tau * um;
+
+  state1 = phi_ * state0 + integral;
+}
+
+// Export the original constant-acceleration and terminal cubic segments, in execution order.
+std::vector<TrajectorySegment> KinodynamicAstar::getSegments() const {
+  std::vector<TrajectorySegment> out;
+  for (const auto node : path_nodes_) {
+    if (!node->parent) continue;
+    TrajectorySegment s;
+    s.duration = node->duration;
+    s.coefficients.col(0) = node->parent->state.head<3>();
+    s.coefficients.col(1) = node->parent->state.tail<3>();
+    s.coefficients.col(2) = node->input/2;
+    out.push_back(s);
+  }
+  if (is_shot_succ_) out.push_back({t_shot_, coef_shot_});
+  return out;
+}
+// Retain the original exported signature for previously compiled independent consumers.
+std::vector<TrajectorySample> KinodynamicAstar::sampleTrajectory(double step) const {
+  return sampleTrajectory(step, kMaxTrajectorySamples);
+}
+// Preflight the whole result before allocating samples: callers can impose a tighter output cap.
+std::vector<TrajectorySample> KinodynamicAstar::sampleTrajectory(double step, std::size_t max_samples) const {
+  if (!std::isfinite(step) || step <= 0) throw std::invalid_argument("sample step must be positive");
+  const auto segments = getSegments();
+  const auto limit = std::min(max_samples, kMaxTrajectorySamples);
+  std::size_t sample_count = 0;
+  for (const auto& s : segments) {
+    const double count = std::ceil(s.duration / step);
+    if (!std::isfinite(count) || count > limit)
+      throw std::length_error("too many trajectory samples");
+    const auto n = std::max<std::size_t>(1, static_cast<std::size_t>(count));
+    const auto added = n + (sample_count == 0 ? 1 : 0);
+    if (added > limit - sample_count) throw std::length_error("too many trajectory samples");
+    sample_count += added;
+  }
+  std::vector<TrajectorySample> out;
+  out.reserve(sample_count);
+  double elapsed = 0;
+  for (const auto& s : segments) {
+    const double count = std::ceil(s.duration/step);
+    // Divide each segment evenly so the endpoint is exact; omit the already-emitted shared start.
+    const int n = std::max(1, static_cast<int>(count));
+    for (int i = out.empty() ? 0 : 1; i <= n; ++i) {
+      const double t = s.duration*i/n;
+      const auto& c = s.coefficients;
+      out.push_back({elapsed+t, c.col(0)+c.col(1)*t+c.col(2)*t*t+c.col(3)*t*t*t,
+          c.col(1)+2*c.col(2)*t+3*c.col(3)*t*t, 2*c.col(2)+6*c.col(3)*t});
+    }
+    elapsed += s.duration;
+  }
+  return out;
+}
+std::vector<Eigen::Vector3d> KinodynamicAstar::getKinoTraj(double step) const {
+  std::vector<Eigen::Vector3d> out;
+  for (const auto& sample : sampleTrajectory(step)) out.push_back(sample.position);
+  return out;
+}
+std::vector<PathNodePtr> KinodynamicAstar::getVisitedNodes() {
+  return {path_node_pool_.begin(), path_node_pool_.begin()+use_node_num_};
+}

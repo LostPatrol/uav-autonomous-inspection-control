@@ -1,0 +1,141 @@
+{
+  "name": "无人机CPU与FPGA协同轨迹规划软件",
+  "purpose": "本软件面向无人机三维障碍环境的局部轨迹规划，根据点云、当前位置、速度和目标位置，完成CPU候选路径搜索、Ising/QUBO问题构建、FPGA通信适配与连续轨迹生成，为上层任务及下层轨迹跟踪软件提供统一的规划结果。",
+  "environment": [
+    [
+      "软件版本",
+      "V1.0"
+    ],
+    [
+      "操作系统",
+      "Ubuntu 24.04"
+    ],
+    [
+      "运行框架",
+      "ROS 2 Jazzy"
+    ],
+    [
+      "开发语言",
+      "Python 3.12、C++17、Bash"
+    ],
+    [
+      "主要依赖",
+      "NumPy、PyYAML、rclpy、ROS 2标准消息及服务生成工具"
+    ],
+    [
+      "运行设备",
+      "支持Ubuntu与ROS 2的主机；板卡模式连接Ising/QUBO优化器"
+    ],
+    [
+      "输入与输出",
+      "输入三维点云、里程计和目标；输出规划状态、三次多项式段及轨迹采样"
+    ],
+    [
+      "软件规模",
+      "主机端主要实现10,799物理行；配套接口与离线兼容依赖另列"
+    ]
+  ],
+  "sections": [
+    {
+      "title": "1 软件概述与工作流程",
+      "paragraphs": [
+        "软件把三维几何处理、离散优化与连续轨迹输出组织为一条规划流程。主机端先将当前点云转换为局部占据栅格，按机体半径与配置余量膨胀障碍；CPU搜索提供候选路径，分层候选点构成QUBO问题，经优化器接口求解后选出路径。",
+        "轨迹生成模块结合实测起点位置和速度，为路径分配时间并构造C2连续的三次Hermite多项式，执行方向速度、加速度及整条曲线的占据体素检查。ROS 2适配层管理持久目标、重规划、取消、结果身份及运行状态，向外输出统一的规划协议。"
+      ],
+      "images": [
+        {
+          "path": "运行截图/01-architecture.png",
+          "caption": "图1 软件规划流程。图中同时列出正常板卡模式及本次离线软件求解路径。"
+        }
+      ]
+    },
+    {
+      "title": "2 安装与文件组成",
+      "paragraphs": [
+        "交付目录包含独立ROS 2工作区、配置文件、安装和运行脚本。workspace/src中的fpga_uav_planner_ros2为Python规划与协议适配包，fpga_uav_native为C++主机加速内核，path_planning为配套消息和服务包。",
+        "在已安装ROS 2 Jazzy与常规构建依赖的主机上进入软件目录，执行./setup.sh建立独立Python环境并完成原生构建；已有环境时执行./build.sh。构建使用本机CPU并生成本机架构的程序。"
+      ],
+      "steps": [
+        "按README安装NumPy、PyYAML、colcon及所列ROS 2依赖。",
+        "执行./setup.sh，等待三个ROS包构建完成。",
+        "执行./run.sh --check，确认规划器、消息与服务已安装。",
+        "执行./test.sh，检查多项式轨迹与本地DDS接口。"
+      ]
+    },
+    {
+      "title": "3 输入数据与参数配置",
+      "paragraphs": [
+        "输入点云采用sensor_msgs/PointCloud2，默认主题为/odin1/cloud_slam_down；里程计采用nav_msgs/Odometry，主题为/avoidance/odom。二者使用planning_frame指定的同一规划坐标系。odometry_twist_in_body决定里程计线速度是否按姿态从机体坐标系旋转到规划坐标系。",
+        "config/backend.yaml集中设置板卡IP、本机绑定IP、UDP端口、栅格分辨率、局部窗口、机体半径、求解迭代及重规划周期。max_velocity_xy、max_velocity_z、max_acceleration_xy、max_acceleration_z分别设置水平和垂直方向限额，并随规划结果回传。",
+        "板卡模式将fpga_ip、bind_ip、udp_port填写为实际通信配置，保持mock为false。通过ROS参数cloud_topic、search_lower、search_upper配置点云入口及搜索边界。离线示例使用config/offline_mock.yaml，启用明确的软件MOCK求解。"
+      ]
+    },
+    {
+      "title": "4 启动与目标操作",
+      "paragraphs": [
+        "run.sh提供安装检查、离线软件与正常板卡三种入口。默认执行./run.sh进入安装检查；./run.sh --mock启动LOCALHOST的软件求解模式；./run.sh --hardware加载板卡配置并启动规划服务。板卡运行时将ROS_DOMAIN_ID设为传感器所在域。",
+        "目标通过/fpga_avoidance/set_goal提交。请求包含规划坐标系、target_id、active及目标位置；active为true时设置或更新目标，为false时取消相应目标。目标受理后，规划节点结合最新地图和里程计生成轨迹，并根据重规划配置持续更新。"
+      ],
+      "steps": [
+        "正常板卡运行示例：./run.sh --hardware -p planning_frame:=odom -p cloud_topic:=/mapping/cloud。",
+        "设置目标示例：ros2 service call /fpga_avoidance/set_goal path_planning/srv/SetGoal \"{header: {frame_id: odom}, target_id: inspection-01, active: true, goal: {x: 4.0, y: 0.0, z: 1.0}}\"。",
+        "使用ros2 topic echo /fpga_avoidance/status查看输入、连接及求解来源；订阅/fpga_avoidance/plan_result获取规划结果。",
+        "取消任务时对同一target_id发送active: false；终端按Ctrl-C停止当前规划节点。"
+      ]
+    },
+    {
+      "title": "5 结果、运行状态与软件接口",
+      "paragraphs": [
+        "/fpga_avoidance/plan_result返回planner_session、target_id、goal_revision和sequence，用于识别规划进程、目标及本次结果；同时给出状态、耗时、运动限额、多项式段和轨迹采样。REACH_END表示曲线到达目标，REACH_HORIZON表示输出局部窗口中的前缀；地图、输入及搜索状态通过对应状态码和detail说明。",
+        "/fpga_avoidance/status返回ready、mock、source、transactions、hardware_transactions、hardware_participation、solve_ms、cpu_ms及error。source描述实际采用的直连、优化器或确定性回退路径；离线模式带mock:前缀。硬件事务数和hardware_participation共同记录板卡参与情况。",
+        "/fpga_avoidance/plan_motion提供CHECK_LINE和VALIDATE_TRAJECTORY两类几何检查，分别用于直线检查及给定多项式的当前地图检查；持续规划通过/fpga_avoidance/set_goal提交目标。执行软件按结果中的多项式系数和局部时间计算位置、速度和加速度。"
+      ],
+      "images": [
+        {
+          "path": "运行截图/04-source-status.png",
+          "caption": "图2 本次离线DDS运行状态摘录，由节点返回字段绘制。实际来源为mock:deterministic，硬件事务为0。"
+        }
+      ]
+    },
+    {
+      "title": "6 离线示例与输出查看",
+      "paragraphs": [
+        "执行./demo.sh /absolute/output/directory可复现合成墙体点云示例。脚本启动实际软件MOCK节点，通过DDS输入固定障碍点云与静止里程计，将起点设为(0, 0, 1)m、目标设为(4, 0, 1)m，保存原始结果JSON和trajectory.csv。",
+        "本次运行输出5段多项式，轨迹时长为15.357s，采样最大速度为0.430m/s、采样最大加速度为0.930m/s²。服务检查结果显示起终点直线被障碍阻挡，返回曲线通过当前膨胀体素地图检查。实际采用的软件确定性回退来源为mock:deterministic。",
+        "图3和图4直接使用本次节点返回的多项式及输入点云绘制；曲线的p、v、a由同一组多项式解析求值。examples/reference_output保留对应JSON与CSV，便于核对或重新绘图。"
+      ],
+      "images": [
+        {
+          "path": "运行截图/02-offline-route.png",
+          "caption": "图3 合成墙体场景的三维与俯视路径。离线软件MOCK运行，采用确定性回退轨迹。"
+        },
+        {
+          "path": "运行截图/03-pva-curves.png",
+          "caption": "图4 本次返回多项式对应的位置、速度与加速度曲线。"
+        }
+      ]
+    },
+    {
+      "title": "7 集成与维护",
+      "paragraphs": [
+        "与任务管理和机载跟踪软件集成时，保持共同的坐标系、运动限额及path_planning协议定义，按planner_session、target_id和goal_revision关联目标与结果。规划软件输出轨迹，由跟踪软件完成轨迹接续和控制执行。",
+        "更换板卡网络时修改config/backend.yaml；调整地图窗口、分辨率或运动限额时修改配置并复查输出。维护求解和轨迹算法时定位fpga_solver目录，维护ROS生命周期与结果字段时定位flight_backend_node.py，维护主机C++加速时定位fpga_uav_native。",
+        "软件采用GPLv3并保留来源说明。适配、轨迹生成及系统集成由项目作者完成；板端Ising/QUBO优化器由合作方提供。当前交付组织主机端源码与公共接口，开发者及权属信息按实际合作资料填写。"
+      ]
+    }
+  ],
+  "source_files": [
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/flight_backend_node.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/__init__.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/dyn_ising_adapter.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/executable_trajectory.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/fpga_uav_solver.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/native_fastpath.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/optimizer_bridge.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/protocol.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/qubo_model.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/uav_kino_planner.py",
+    "workspace/src/fpga_uav_native/src/native_fastpath.cpp"
+  ],
+  "slug": "fpga-trajectory-planner"
+}

@@ -1,0 +1,251 @@
+{
+  "software": "无人机CPU与FPGA协同轨迹规划软件",
+  "version": "V1.0",
+  "frozen_at": "2026-11-11T12:48:51.991731+08:00",
+  "origin": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/fpga_avoidance",
+  "origin_git_commit": "541c529b4fa4f21e87121acbed4a17ba6e18ef4c",
+  "origin_git_status": "",
+  "source_files": [
+    {
+      "path": ".gitignore",
+      "sha256": "e2fc9b8df78da8e1f468d1c403ceb7897674e99c7fecbedba9df52b7988baedb",
+      "bytes": 161
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "bytes": 35149
+    },
+    {
+      "path": "PROVENANCE.md",
+      "sha256": "7ffaed514cb4781e523837fd7f62b6fd02d83e656d2f54cb8e14e9758fe1fd89",
+      "bytes": 1459
+    },
+    {
+      "path": "README.md",
+      "sha256": "270e39f22aec3a2b797b0034e6af9a507fc324c0ed62afc5ebf0dbb7dd357ed3",
+      "bytes": 6573
+    },
+    {
+      "path": "build.sh",
+      "sha256": "e47f0ba48cf8d5e1f24b76b39ed1649908ee5857467b88ce2980d9c5761793e2",
+      "bytes": 1803
+    },
+    {
+      "path": "config/backend.yaml",
+      "sha256": "6cc1a91c7a4a61f366f7018fcc79fbaff2815f6c11a44aa00e203dde5544dca4",
+      "bytes": 1271
+    },
+    {
+      "path": "install.sh",
+      "sha256": "131200e0d4723525a9a1bff8dc9fc60252b8d98ef7bd26598105c431cbc8ec4c",
+      "bytes": 1015
+    },
+    {
+      "path": "start.sh",
+      "sha256": "a60cbf85f3d2dd1a5a520901b5d269ac8a4a2237ac4b88628cdc44bd676155d6",
+      "bytes": 2043
+    },
+    {
+      "path": "stop.sh",
+      "sha256": "49704dfc2eb040c05e84afb237b8c6f55edb39fde59101e88188c463784bda34",
+      "bytes": 699
+    },
+    {
+      "path": "test.sh",
+      "sha256": "be9ebcfbf77765e399c461a4867711a5ca491ae237715e38912d3624a9406f88",
+      "bytes": 959
+    },
+    {
+      "path": "tests/test_executable_trajectory.py",
+      "sha256": "fc2c4b30cae2e64d4fecfc276d5c5639ce8da4aa840981ed119855acddc6566e",
+      "bytes": 12434
+    },
+    {
+      "path": "tests/test_flight_backend.py",
+      "sha256": "7ebb10f6228eaa79d8789d49e261706cff5d2f61db4d7474c757b71b9739c5e1",
+      "bytes": 27621
+    },
+    {
+      "path": "workspace/src/fpga_uav_native/CMakeLists.txt",
+      "sha256": "c070223c075f473ae39431eeed82fcabb15bf8430f4c30d2a6eb104b12241e60",
+      "bytes": 780
+    },
+    {
+      "path": "workspace/src/fpga_uav_native/package.xml",
+      "sha256": "1e61bd9ffcfc854260ffa16e0823bc109f211dab9c6321f2f1d8eb3afc8be128",
+      "bytes": 549
+    },
+    {
+      "path": "workspace/src/fpga_uav_native/src/native_fastpath.cpp",
+      "sha256": "3b74955b4a683612a924a5d7e713df8ac6d579249588f0fb686752124706c36c",
+      "bytes": 61476
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/config/astar_defaults.yaml",
+      "sha256": "773936374a6f828e9fda1a04882c33f404f8fd251a5eec2024b2af3737545d78",
+      "bytes": 413
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/config/compare_defaults.yaml",
+      "sha256": "3c5813607bc88f651ca096cbe2696bf473d54ed3253debf98effa3e6532d7894",
+      "bytes": 587
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/config/planner_defaults.yaml",
+      "sha256": "a0d486ab0cdf87f9c6cbe9720d9dda401225a0109f028c20023117d7dd1f3e1f",
+      "bytes": 2506
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/__init__.py",
+      "sha256": "33fdf5b1998e10ffbbb6b704640c3215abb2287e984bdf6ad5926eefc4ee2d2e",
+      "bytes": 66
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/flight_backend_node.py",
+      "sha256": "8883e9954abf031cda7e49af015ebdad90c6ef7f429662857a050efb30d00164",
+      "bytes": 32770
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_astar_compare.py",
+      "sha256": "0079ad49a783dc07b6511f42ac64abfee072dd82f2205e467d983e27a64a6a7d",
+      "bytes": 41582
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_kino_planner_node.py",
+      "sha256": "a995eae003bf48319b3685336b7e5e5657363289ee424de40248006220e67717",
+      "bytes": 75845
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/__init__.py",
+      "sha256": "719bd1f42681aff160c7a8f5e9080eb85b20c74aba06ea1ae34a23af26028c36",
+      "bytes": 201
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/dyn_ising_adapter.py",
+      "sha256": "ddb5726f00947474a8746f9ba95015cdb352c209da7cdd1334024bbae6b83951",
+      "bytes": 49876
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/executable_trajectory.py",
+      "sha256": "bef890e1238602bcf61dd9c7abecd2429b3566d99e179a410f7fc95cc0cf9d4e",
+      "bytes": 10147
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/fpga_uav_solver.py",
+      "sha256": "5bb812dfbd3de7713a25ec4785971c723dbae6f248b7653a6c4779faa0a29538",
+      "bytes": 25459
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/native_fastpath.py",
+      "sha256": "d0ed9ac86630f3181cdf6eae410a697e0a51c41abe5745ce28f0388e8b937ed5",
+      "bytes": 23894
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/optimizer_bridge.py",
+      "sha256": "b612432b32ceff959df771ce1446826b0d0345803dc50fbb87dc075e125559da",
+      "bytes": 16423
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/protocol.py",
+      "sha256": "eec07f674b4f9a5dbc6d6b1d0f535d0a3247a080cfc8a33dcfab32fbc0536e04",
+      "bytes": 28919
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/qubo_model.py",
+      "sha256": "81f6cba76ed9aecfc450a6b3366dc63b661bc10aa2504f50821e1a5d14886c1d",
+      "bytes": 25876
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/uav_kino_planner.py",
+      "sha256": "72cbb5dc1b561da84948c6f97eb7b071d06a30396b37a0a38bc6d4120ad855e7",
+      "bytes": 195363
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/publish_demo_goal.py",
+      "sha256": "d4b515d43cbac04093b6c63fb62f5736d8b4f1584f47450c53834890ed36aa32",
+      "bytes": 2733
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/rospy_compat.py",
+      "sha256": "42471f5a73a00215c42634eaaeb7859e518433c5af1fd2bdb8305a896a3c74d3",
+      "bytes": 6109
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/launch/bag_mock.launch.py",
+      "sha256": "43d51429f5a399b8168fa6d3648a4acf17ce0396b962332676b988273ef54a7e",
+      "bytes": 6878
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/launch/fpga_astar_hardware_compare.launch.py",
+      "sha256": "b2770e14703f9a9df882f0647d674141f5fbbf15e27b6c88c02b924ea8017188",
+      "bytes": 7418
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/launch/fpga_bag_hardware.launch.py",
+      "sha256": "63782f5a5d4a04b322d8bfd79f52def245195a6ceae2d5473bfd6c6a00b16853",
+      "bytes": 5314
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/launch/fpga_planner.launch.py",
+      "sha256": "76a22d856bc7aa11845884a0eda86b6f37e345daf8e62104816511b4c6cb3a34",
+      "bytes": 4055
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/package.xml",
+      "sha256": "f9c9d94a2e2fbd2e5a2b2d48f6b7244c49365e43558769d92c0a7e3dd7ba3ced",
+      "bytes": 1214
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/resource/fpga_uav_planner_ros2",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/rviz/fpga_uav_ros2.rviz",
+      "sha256": "988f55712caa40068ef60b71365c5e2e9fb4ddf08bf226926bdf49f714db1ae1",
+      "bytes": 2583
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/setup.cfg",
+      "sha256": "62e624e38db10cca646cc6eed0cdcd1a40cd64ba0c7fb4cc8eb93283488bd012",
+      "bytes": 111
+    },
+    {
+      "path": "workspace/src/fpga_uav_planner_ros2/setup.py",
+      "sha256": "d52f78e98dc24f95157e3988367c0f5c7135f8148da21114b762c328886cda8c",
+      "bytes": 1393
+    }
+  ],
+  "board_rtl_and_firmware_included": false,
+  "scope": "主机端协同规划、轨迹生成、通信适配及ROS接口；不包含板端RTL或固件源码",
+  "frozen_original_file_count": 42,
+  "extraction_changes": [
+    "Add independent setup/build/run/test/demo entrypoints.",
+    "Extract unchanged path_planning .msg/.srv into an interface-only ROS package.",
+    "Add explicit offline MOCK configuration and synthetic-cloud DDS capture example.",
+    "Keep production host algorithms, native kernels and original tests byte-for-byte unchanged."
+  ],
+  "shared_interface": {
+    "origin": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning",
+    "origin_commit": "8b4630c930870bb3e71379a0731961d9fee54979",
+    "files": [
+      {
+        "path": "workspace/src/path_planning/msg/PlanResult.msg",
+        "sha256": "a0b0f825f626301109fb384a7ab173ef01f9c5e9d34c9d1bcd2cbbae6f51de0f"
+      },
+      {
+        "path": "workspace/src/path_planning/msg/PolynomialSegment.msg",
+        "sha256": "74f48fbfbdc439f31d40d032509e8f1f2dcbe26ce5185238f5bffa936e796933"
+      },
+      {
+        "path": "workspace/src/path_planning/srv/PlanMotion.srv",
+        "sha256": "02da68c813a9973a334b410f612a1f5e96a1350abb12fd027767a7adcbe1dfa9"
+      },
+      {
+        "path": "workspace/src/path_planning/srv/SetGoal.srv",
+        "sha256": "0b16a9eb44dd6da2a2b6c3d45c93de650b5ed74a52868bcf74985bb38528cb6f"
+      }
+    ]
+  }
+}

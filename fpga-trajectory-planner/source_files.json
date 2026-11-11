@@ -1,0 +1,42 @@
+{
+  "software": "无人机CPU与FPGA协同轨迹规划软件",
+  "version": "V1.0",
+  "production": [
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/flight_backend_node.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/__init__.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/dyn_ising_adapter.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/executable_trajectory.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/fpga_uav_solver.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/native_fastpath.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/optimizer_bridge.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/protocol.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/qubo_model.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/uav_kino_planner.py",
+    "workspace/src/fpga_uav_native/src/native_fastpath.cpp"
+  ],
+  "dependencies": [
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_kino_planner_node.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/rospy_compat.py",
+    "workspace/src/path_planning/msg/PlanResult.msg",
+    "workspace/src/path_planning/msg/PolynomialSegment.msg",
+    "workspace/src/path_planning/srv/PlanMotion.srv",
+    "workspace/src/path_planning/srv/SetGoal.srv"
+  ],
+  "source_files": [
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/flight_backend_node.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/__init__.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/dyn_ising_adapter.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/executable_trajectory.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/fpga_uav_solver.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/native_fastpath.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/optimizer_bridge.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/protocol.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/qubo_model.py",
+    "workspace/src/fpga_uav_planner_ros2/fpga_uav_planner_ros2/fpga_solver/uav_kino_planner.py",
+    "workspace/src/fpga_uav_native/src/native_fastpath.cpp"
+  ],
+  "production_lines": 10799,
+  "dependencies_lines": 1642,
+  "counting": "Physical lines including comments and blank lines; excludes tests, examples, setup metadata and legacy comparison tools",
+  "original_source_sha256_check": "PASS"
+}

@@ -1,0 +1,918 @@
+{
+  "software": "无人机点云避障与局部轨迹规划软件",
+  "version": "V1.0",
+  "source_baseline": {
+    "software": "无人机点云避障与局部轨迹规划软件",
+    "version": "V1.0",
+    "freeze_date": "2026-11-11",
+    "source_repositories": [
+      {
+        "path": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2",
+        "commit": "8b4630c930870bb3e71379a0731961d9fee54979",
+        "url": "https://github.com/LostPatrol/dyn_small_obs_avoidance-ros2-modified.git"
+      },
+      {
+        "path": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware",
+        "commit": "541c529b4fa4f21e87121acbed4a17ba6e18ef4c",
+        "url": "https://github.com/xldoooooo/ros2-ardupilot-mavros-control.git"
+      }
+    ],
+    "files": [
+      {
+        "path": "src/path_searching/CMakeLists.txt",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_searching/CMakeLists.txt",
+        "sha256": "7080decc74c793498cf082e4fec9b12d13daaa6565a16fe7af0f1445fc24562a"
+      },
+      {
+        "path": "src/path_searching/include/path_searching/kinodynamic_astar.h",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_searching/include/path_searching/kinodynamic_astar.h",
+        "sha256": "8e0aa2b711f9e076e2307a2bf68ab76d75651cfe2a67e2c4356dd09c8f38a3f9"
+      },
+      {
+        "path": "src/path_searching/package.xml",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_searching/package.xml",
+        "sha256": "f731b002ce52224234e2da627c2f07400a48a9c04274fc6f4f89329bd00297ae"
+      },
+      {
+        "path": "src/path_searching/src/kinodynamic_astar.cpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_searching/src/kinodynamic_astar.cpp",
+        "sha256": "21b9c66cb511505585034d6d9393a8463f3633b49ae0abb039e76cbf62933fbf"
+      },
+      {
+        "path": "src/path_searching/test/test_search.cpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_searching/test/test_search.cpp",
+        "sha256": "6832a4b01dabe010c2d2a9005ebf0f01568bc756bd438bae7770e86045048f58"
+      },
+      {
+        "path": "src/path_planning/CMakeLists.txt",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/CMakeLists.txt",
+        "sha256": "3e0c505390af2ceb335465fee16735f53ddebb6062e33e0ddefbc6e216da0564"
+      },
+      {
+        "path": "src/path_planning/README.md",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/README.md",
+        "sha256": "ce00a51edd09fe06c81744933d9a001f354c47e72522b707aa07e709aa75989e"
+      },
+      {
+        "path": "src/path_planning/config/planner.yaml",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/config/planner.yaml",
+        "sha256": "1db338f072eaf154b6c7569dfda5e77a5d073fd0ce1f943b8fcc6a4ebc7e1f5a"
+      },
+      {
+        "path": "src/path_planning/launch/odin.launch.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/launch/odin.launch.py",
+        "sha256": "d4de88a74b4f25ff2cd3b66f5aea43d10eba9c3723ff78690d19487978bbe43a"
+      },
+      {
+        "path": "src/path_planning/launch/parameter_config.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/launch/parameter_config.py",
+        "sha256": "4ecaa537f35078bcd14449759fa0b06491919d26a064a3071024bb05f10a1234"
+      },
+      {
+        "path": "src/path_planning/launch/planner.launch.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/launch/planner.launch.py",
+        "sha256": "5b1d7e908f37c3d2e1a2d7d246423e0d27509ba984f533819577bc29f3e01b95"
+      },
+      {
+        "path": "src/path_planning/msg/PlanResult.msg",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/msg/PlanResult.msg",
+        "sha256": "a0b0f825f626301109fb384a7ab173ef01f9c5e9d34c9d1bcd2cbbae6f51de0f"
+      },
+      {
+        "path": "src/path_planning/msg/PolynomialSegment.msg",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/msg/PolynomialSegment.msg",
+        "sha256": "74f48fbfbdc439f31d40d032509e8f1f2dcbe26ce5185238f5bffa936e796933"
+      },
+      {
+        "path": "src/path_planning/package.xml",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/package.xml",
+        "sha256": "856494d42f8900616ebf54762cc1202bcd17e8c8d4fd1568ba3b6c84bd726b20"
+      },
+      {
+        "path": "src/path_planning/src/motion_adapter.hpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/src/motion_adapter.hpp",
+        "sha256": "804bbd75512fca7dc54ba55d31f52c6c6e83d2e36c9546bf7b169271fc8b647b"
+      },
+      {
+        "path": "src/path_planning/src/output_contract.hpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/src/output_contract.hpp",
+        "sha256": "8702e345da9460c96bd126367d531deada90208d39b19f95c2fd40b682a106f7"
+      },
+      {
+        "path": "src/path_planning/src/path_planning.cpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/src/path_planning.cpp",
+        "sha256": "5d3791a3b711c8ed24449d68ee041712cfded316527acc20af87797cbbe1da78"
+      },
+      {
+        "path": "src/path_planning/srv/PlanMotion.srv",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/srv/PlanMotion.srv",
+        "sha256": "02da68c813a9973a334b410f612a1f5e96a1350abb12fd027767a7adcbe1dfa9"
+      },
+      {
+        "path": "src/path_planning/srv/SetGoal.srv",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/srv/SetGoal.srv",
+        "sha256": "0b16a9eb44dd6da2a2b6c3d45c93de650b5ed74a52868bcf74985bb38528cb6f"
+      },
+      {
+        "path": "src/path_planning/test/benchmark.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/benchmark.py",
+        "sha256": "3b8b4262eb7894562c49b01fd127d9e07fa17445fcdd1b8a737a6206bc0cad47"
+      },
+      {
+        "path": "src/path_planning/test/test_benchmark.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_benchmark.py",
+        "sha256": "349833605975e55958735a2515c3d6a4cd9568a5ad621401e4bb55994f998d43"
+      },
+      {
+        "path": "src/path_planning/test/test_launch_config.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_launch_config.py",
+        "sha256": "b0aa20cc2f091460e3b2e23fb53d2b70b9487af9b33abc5312fd0962b6e39208"
+      },
+      {
+        "path": "src/path_planning/test/test_motion_adapter.cpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_motion_adapter.cpp",
+        "sha256": "5a591393cc55c2b127bd3854a843ccafaa02d04562a0846f6fb06f924abd023f"
+      },
+      {
+        "path": "src/path_planning/test/test_motion_service.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_motion_service.py",
+        "sha256": "ccb242a1c5666c26cac7d586df382842952e8a12211ba1e940ad11d0d1f98035"
+      },
+      {
+        "path": "src/path_planning/test/test_output_contract.cpp",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_output_contract.cpp",
+        "sha256": "11c5c86492c774f792e101569520f233d5073bfeb9c0b2a8a178dc901567a243"
+      },
+      {
+        "path": "src/path_planning/test/test_replanning.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_replanning.py",
+        "sha256": "65b7176b8780fb04b58a7f6707d51bc8ac1d832fc33f635f4bb43a8fc36ac783"
+      },
+      {
+        "path": "src/path_planning/test/test_ros_io.py",
+        "original": "/home/nvidia/scq/projects/dyn_small_obs_avoidance-ros2/path_planning/test/test_ros_io.py",
+        "sha256": "552dd43949914b90475116ead0e8b9c4900a9a03bb9a23e454e847e6023fe3c7"
+      },
+      {
+        "path": "src/avoidance_bridge/CMakeLists.txt",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/CMakeLists.txt",
+        "sha256": "27840f984139e7049e1687ca84c2ecb57619ea5164d2fc6a2134af35253b95e0"
+      },
+      {
+        "path": "src/avoidance_bridge/README.md",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/README.md",
+        "sha256": "559a555561a9f20d3bc4626cf1d2906d5f9cca4b4dc68121d911ea548a8aa0ef"
+      },
+      {
+        "path": "src/avoidance_bridge/launch/avoidance.launch.py",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/launch/avoidance.launch.py",
+        "sha256": "3fec2cd9437bec5d381d99cc80534e9f5c06d34cf5aa3d2088b995ca65aab29e"
+      },
+      {
+        "path": "src/avoidance_bridge/package.xml",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/package.xml",
+        "sha256": "0672a8a71c03512045c2e4b6882b4376241934e80e69e0bd44d56c801b97ee2c"
+      },
+      {
+        "path": "src/avoidance_bridge/scripts/avoidance_backend_manager.py",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/scripts/avoidance_backend_manager.py",
+        "sha256": "6abe2c318687e199f9cc0b668dbf617af12e3c8cdd14b1bb8ef716c4dabfbe6a"
+      },
+      {
+        "path": "src/avoidance_bridge/scripts/avoidance_backend_process.py",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/scripts/avoidance_backend_process.py",
+        "sha256": "67117ecbe13a5f465339d103af13e5eed32f84b3ff0cea17bf9f97255c4f62aa"
+      },
+      {
+        "path": "src/avoidance_bridge/src/avoidance_bridge.cpp",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/src/avoidance_bridge.cpp",
+        "sha256": "b3e87977233e8aa4ddc1282dd4c4f3f92dbe075b6c86ab1dd3f9aab26953461e"
+      },
+      {
+        "path": "src/avoidance_bridge/test/test_backend_selection_ros.py",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/test/test_backend_selection_ros.py",
+        "sha256": "fc7ccd76cbee2a58148a1fbdf2d6133e35e12f13083cb9be476c533e084b8209"
+      },
+      {
+        "path": "src/avoidance_bridge/test/test_bridge_ros.py",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/test/test_bridge_ros.py",
+        "sha256": "554ad3a609a799a59fbb9bf8dbec20089a13aba85d624eba3d429597808350b7"
+      },
+      {
+        "path": "src/avoidance_bridge/test/test_launch_parameters.py",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/avoidance_bridge/test/test_launch_parameters.py",
+        "sha256": "1b1f51ba84dd3b72990a359c3d4a33c7313a27f0eab819a6e991189330f2855f"
+      },
+      {
+        "path": "src/guided_interfaces/CMakeLists.txt",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/CMakeLists.txt",
+        "sha256": "aa675660aa52ce6d6fd8cf20b90cca91a8f44c52a8c33352f49f7a5728e03a48"
+      },
+      {
+        "path": "src/guided_interfaces/msg/AvoidanceRequest.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/AvoidanceRequest.msg",
+        "sha256": "345413edf041e4e7af19a5ca86446782151529db57da16025d59d1fe0017b905"
+      },
+      {
+        "path": "src/guided_interfaces/msg/AvoidanceResult.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/AvoidanceResult.msg",
+        "sha256": "c8253d6a26db7b2011941d15285df4f2c66d89705078b86d93c99a40cbd78c3a"
+      },
+      {
+        "path": "src/guided_interfaces/msg/CommandResult.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/CommandResult.msg",
+        "sha256": "809484232574c3492ddfa3f8d91aa6b5feb28abc10df72836617097b701459a9"
+      },
+      {
+        "path": "src/guided_interfaces/msg/ControlHeartbeat.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/ControlHeartbeat.msg",
+        "sha256": "f55398bd87eb92739c55d53b05971157f5232f8f0929e472482217bd6219e625"
+      },
+      {
+        "path": "src/guided_interfaces/msg/ControlStatus.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/ControlStatus.msg",
+        "sha256": "57cdca11eea47548bd6591681fcc506fb5e56673bdc48544b914948f9e61e00e"
+      },
+      {
+        "path": "src/guided_interfaces/msg/MotionIntent.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/MotionIntent.msg",
+        "sha256": "83ffb728150de90576bcdb7e3ad5a61e4abaf2ea69a294087536000830f3c91f"
+      },
+      {
+        "path": "src/guided_interfaces/msg/PolynomialSegment.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/PolynomialSegment.msg",
+        "sha256": "f005c6680859145a1cacb7a698b7840c8e9a287363f34321e1a583a03ea73a95"
+      },
+      {
+        "path": "src/guided_interfaces/msg/TrackingSample.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/TrackingSample.msg",
+        "sha256": "a0e147cb96a9721aaa65b9d834b10e6dbfca688923eb286ae6308add462e1ea6"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoCapture.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/VideoCapture.msg",
+        "sha256": "c326192addd5a4d0fb46d9a09b8dbdfc1340731e97bc1357a386fd94ddb7905e"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoCaptureResult.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/VideoCaptureResult.msg",
+        "sha256": "c31c6473b91c9ce1e616015aed04256bc0ef43a66947cb18ed8b810049bb1514"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoControl.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/VideoControl.msg",
+        "sha256": "fd128cfce79c0ad4b0e3c0823fdfb6ff88bef0e996f58710361e15e38867b0b2"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoStatus.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/VideoStatus.msg",
+        "sha256": "1d3c2121099b22e3123cb4a6a09d405158794393ca260c4035583e7a8875c38c"
+      },
+      {
+        "path": "src/guided_interfaces/msg/Waypoint.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/msg/Waypoint.msg",
+        "sha256": "01f4d015f880379e6fda6c1ddf0bb4da07a94b5de6ab83922ad1019913ae009f"
+      },
+      {
+        "path": "src/guided_interfaces/package.xml",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/package.xml",
+        "sha256": "dca6954a7ef7787d0f2387f09d687e9caf0100606a3361045fc51971b5b956a9"
+      },
+      {
+        "path": "src/guided_interfaces/srv/AcquireControl.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/srv/AcquireControl.srv",
+        "sha256": "efeca16c387a1ad545ebf0a59181606442ff3187d142bd0f938f7f4d34f8b997"
+      },
+      {
+        "path": "src/guided_interfaces/srv/ExecuteWaypoints.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/srv/ExecuteWaypoints.srv",
+        "sha256": "688a33f6e1a8e0c63f4f0410b1bff4b4d7e8a3c229cbd9cece00943c3a316c9d"
+      },
+      {
+        "path": "src/guided_interfaces/srv/FlightCommand.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/srv/FlightCommand.srv",
+        "sha256": "61983b88722f87436eac8bd6013b8182606719659cf7814b5f851a947a3093e7"
+      },
+      {
+        "path": "src/guided_interfaces/srv/SetGpsOrigin.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/srv/SetGpsOrigin.srv",
+        "sha256": "e332cdd24c3225a51d89fd55726728b6427f5b112fd40a7c578fbe7978ed4a02"
+      },
+      {
+        "path": "src/guided_interfaces/srv/SetNavigationMode.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/srv/SetNavigationMode.srv",
+        "sha256": "cb2730cc39d80df6f19ba2567a20ab7c8d953510a6bb8b5e0bd2a812d25bd309"
+      },
+      {
+        "path": "src/guided_interfaces/srv/SetVideoState.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/guided_interfaces/srv/SetVideoState.srv",
+        "sha256": "e8c539627a0e07147966fb3301112aa58ba57579b6e765acfcdb24cea6d11bc9"
+      },
+      {
+        "path": "src/correction_interfaces/CMakeLists.txt",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/CMakeLists.txt",
+        "sha256": "9a521cba2b6a1016817045f0c2848ac02360659c7e12bd7e6200a4c5b29c8bfc"
+      },
+      {
+        "path": "src/correction_interfaces/msg/CalibrationKeyframe.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/msg/CalibrationKeyframe.msg",
+        "sha256": "cbca837990fac48eb2774affa7e6f891c43dce4e33f79dc911f65f84d04f61db"
+      },
+      {
+        "path": "src/correction_interfaces/msg/CorrectionResult.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/msg/CorrectionResult.msg",
+        "sha256": "8960812f6a786fb85058d981b8221d0bf353d3dbe4339098d14a05fa3e1f24f4"
+      },
+      {
+        "path": "src/correction_interfaces/msg/CorrectionStatus.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/msg/CorrectionStatus.msg",
+        "sha256": "8a4ff754746729e8714a7d357b452647861250642674ab18f711b05bb9eccb4e"
+      },
+      {
+        "path": "src/correction_interfaces/msg/ExtnavCorrectionStatus.msg",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/msg/ExtnavCorrectionStatus.msg",
+        "sha256": "cfd29012bd6e5d4a5b68d95b240cde45c97d101b345e43c4531e03ce8231e54c"
+      },
+      {
+        "path": "src/correction_interfaces/package.xml",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/package.xml",
+        "sha256": "4b33c9ca00d753baee65daa12e65b5bfd86e2075c739451c3867b4ca822ff455"
+      },
+      {
+        "path": "src/correction_interfaces/srv/ApplySavedCorrection.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/ApplySavedCorrection.srv",
+        "sha256": "42cf8c6cbf1dbd24df80893839f219e59e135f97e050954e7e22a1bd00b3e19e"
+      },
+      {
+        "path": "src/correction_interfaces/srv/ClearWindow.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/ClearWindow.srv",
+        "sha256": "3bd368b562b71b7b9a91234b2a85b0631b0b9877bd926772ab1dcaaa678b0877"
+      },
+      {
+        "path": "src/correction_interfaces/srv/ConfigureTags.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/ConfigureTags.srv",
+        "sha256": "f1048bc8cb231345571329968026c5b043c4bf492e8ec952208b4768b65d659c"
+      },
+      {
+        "path": "src/correction_interfaces/srv/SetCalibrationOwner.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/SetCalibrationOwner.srv",
+        "sha256": "3263fe61b2425797d4eaab6c2f1cc3d972894006ce19af038f7acda21aee668c"
+      },
+      {
+        "path": "src/correction_interfaces/srv/SetCorrection.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/SetCorrection.srv",
+        "sha256": "5822191d7063deb8f91590d738f6f995cafd15b62c73421686a84c55fda71c48"
+      },
+      {
+        "path": "src/correction_interfaces/srv/StartCorrection.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/StartCorrection.srv",
+        "sha256": "b5d75488cd4879f740005641114b59ff91ecc53c795fc23d270150c39e0e6e57"
+      },
+      {
+        "path": "src/correction_interfaces/srv/StopCorrection.srv",
+        "original": "/home/nvidia/scq/projects/ros2-ardupilot-sitl-hardware/src/correction_interfaces/srv/StopCorrection.srv",
+        "sha256": "7a988bddcda10e64606cd1ceadd665de1ecec06fecfce5b1a343f527cf77e33c"
+      }
+    ],
+    "independent_adaptations": [
+      "avoidance.launch.py以本包安装share目录读取配置，替代原主工程project_configuration.py路径探测",
+      "avoidance_bridge CMake安装自带config/planner.yaml；增加独立构建、环境加载和运行入口",
+      "测试/benchmark路径按src工作区适配；测试产物指向PLANNER_TEST_OUTPUT或/tmp/pointcloud-planner-tests",
+      "新增合成点云演示scripts/demo.py，保存真实ROS规划输出；不修改搜索与桥接生产算法"
+    ],
+    "listing": "source_files.json",
+    "packaged_file_hashes": [
+      {
+        "path": "LICENSE",
+        "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+      },
+      {
+        "path": "THIRD_PARTY_NOTICES.md",
+        "sha256": "3f505e4d4e37341712e17864385580e32e5610b5a78b465622632e3a47578154"
+      },
+      {
+        "path": "src/avoidance_bridge/CMakeLists.txt",
+        "sha256": "86c2380f987d00dc4fba448aa7525be16c4bea70613be4b140bab54e967e191d"
+      },
+      {
+        "path": "src/avoidance_bridge/README.md",
+        "sha256": "559a555561a9f20d3bc4626cf1d2906d5f9cca4b4dc68121d911ea548a8aa0ef"
+      },
+      {
+        "path": "src/avoidance_bridge/config/planner.yaml",
+        "sha256": "f3bb0e4bc132041b5afb60f65d73254f87698eebd9c48f3a23ace92b14a99873"
+      },
+      {
+        "path": "src/avoidance_bridge/launch/avoidance.launch.py",
+        "sha256": "f85e44dc87f6deaa958cc987da24d9d1531e5c775da5ef444b906f0deac93b04"
+      },
+      {
+        "path": "src/avoidance_bridge/package.xml",
+        "sha256": "0672a8a71c03512045c2e4b6882b4376241934e80e69e0bd44d56c801b97ee2c"
+      },
+      {
+        "path": "src/avoidance_bridge/scripts/avoidance_backend_manager.py",
+        "sha256": "6abe2c318687e199f9cc0b668dbf617af12e3c8cdd14b1bb8ef716c4dabfbe6a"
+      },
+      {
+        "path": "src/avoidance_bridge/scripts/avoidance_backend_process.py",
+        "sha256": "67117ecbe13a5f465339d103af13e5eed32f84b3ff0cea17bf9f97255c4f62aa"
+      },
+      {
+        "path": "src/avoidance_bridge/src/avoidance_bridge.cpp",
+        "sha256": "b3e87977233e8aa4ddc1282dd4c4f3f92dbe075b6c86ab1dd3f9aab26953461e"
+      },
+      {
+        "path": "src/avoidance_bridge/test/test_backend_selection_ros.py",
+        "sha256": "75debcf95efea889bc3a75bded361494b88a9302f3783c25b3d8584ea4ab5668"
+      },
+      {
+        "path": "src/avoidance_bridge/test/test_bridge_ros.py",
+        "sha256": "c29ff0a62edaba85704b7248ee429e36b3e032e7c5f3e93242eaa2887decc13d"
+      },
+      {
+        "path": "src/avoidance_bridge/test/test_launch_parameters.py",
+        "sha256": "2f369749456b0fec5b7f9ed77ef123dcc112e7367da4d97955735455cdf06eda"
+      },
+      {
+        "path": "src/correction_interfaces/CMakeLists.txt",
+        "sha256": "9a521cba2b6a1016817045f0c2848ac02360659c7e12bd7e6200a4c5b29c8bfc"
+      },
+      {
+        "path": "src/correction_interfaces/msg/CalibrationKeyframe.msg",
+        "sha256": "cbca837990fac48eb2774affa7e6f891c43dce4e33f79dc911f65f84d04f61db"
+      },
+      {
+        "path": "src/correction_interfaces/msg/CorrectionResult.msg",
+        "sha256": "8960812f6a786fb85058d981b8221d0bf353d3dbe4339098d14a05fa3e1f24f4"
+      },
+      {
+        "path": "src/correction_interfaces/msg/CorrectionStatus.msg",
+        "sha256": "8a4ff754746729e8714a7d357b452647861250642674ab18f711b05bb9eccb4e"
+      },
+      {
+        "path": "src/correction_interfaces/msg/ExtnavCorrectionStatus.msg",
+        "sha256": "cfd29012bd6e5d4a5b68d95b240cde45c97d101b345e43c4531e03ce8231e54c"
+      },
+      {
+        "path": "src/correction_interfaces/package.xml",
+        "sha256": "4b33c9ca00d753baee65daa12e65b5bfd86e2075c739451c3867b4ca822ff455"
+      },
+      {
+        "path": "src/correction_interfaces/srv/ApplySavedCorrection.srv",
+        "sha256": "42cf8c6cbf1dbd24df80893839f219e59e135f97e050954e7e22a1bd00b3e19e"
+      },
+      {
+        "path": "src/correction_interfaces/srv/ClearWindow.srv",
+        "sha256": "3bd368b562b71b7b9a91234b2a85b0631b0b9877bd926772ab1dcaaa678b0877"
+      },
+      {
+        "path": "src/correction_interfaces/srv/ConfigureTags.srv",
+        "sha256": "f1048bc8cb231345571329968026c5b043c4bf492e8ec952208b4768b65d659c"
+      },
+      {
+        "path": "src/correction_interfaces/srv/SetCalibrationOwner.srv",
+        "sha256": "3263fe61b2425797d4eaab6c2f1cc3d972894006ce19af038f7acda21aee668c"
+      },
+      {
+        "path": "src/correction_interfaces/srv/SetCorrection.srv",
+        "sha256": "5822191d7063deb8f91590d738f6f995cafd15b62c73421686a84c55fda71c48"
+      },
+      {
+        "path": "src/correction_interfaces/srv/StartCorrection.srv",
+        "sha256": "b5d75488cd4879f740005641114b59ff91ecc53c795fc23d270150c39e0e6e57"
+      },
+      {
+        "path": "src/correction_interfaces/srv/StopCorrection.srv",
+        "sha256": "7a988bddcda10e64606cd1ceadd665de1ecec06fecfce5b1a343f527cf77e33c"
+      },
+      {
+        "path": "src/guided_interfaces/CMakeLists.txt",
+        "sha256": "aa675660aa52ce6d6fd8cf20b90cca91a8f44c52a8c33352f49f7a5728e03a48"
+      },
+      {
+        "path": "src/guided_interfaces/msg/AvoidanceRequest.msg",
+        "sha256": "345413edf041e4e7af19a5ca86446782151529db57da16025d59d1fe0017b905"
+      },
+      {
+        "path": "src/guided_interfaces/msg/AvoidanceResult.msg",
+        "sha256": "c8253d6a26db7b2011941d15285df4f2c66d89705078b86d93c99a40cbd78c3a"
+      },
+      {
+        "path": "src/guided_interfaces/msg/CommandResult.msg",
+        "sha256": "809484232574c3492ddfa3f8d91aa6b5feb28abc10df72836617097b701459a9"
+      },
+      {
+        "path": "src/guided_interfaces/msg/ControlHeartbeat.msg",
+        "sha256": "f55398bd87eb92739c55d53b05971157f5232f8f0929e472482217bd6219e625"
+      },
+      {
+        "path": "src/guided_interfaces/msg/ControlStatus.msg",
+        "sha256": "57cdca11eea47548bd6591681fcc506fb5e56673bdc48544b914948f9e61e00e"
+      },
+      {
+        "path": "src/guided_interfaces/msg/MotionIntent.msg",
+        "sha256": "83ffb728150de90576bcdb7e3ad5a61e4abaf2ea69a294087536000830f3c91f"
+      },
+      {
+        "path": "src/guided_interfaces/msg/PolynomialSegment.msg",
+        "sha256": "f005c6680859145a1cacb7a698b7840c8e9a287363f34321e1a583a03ea73a95"
+      },
+      {
+        "path": "src/guided_interfaces/msg/TrackingSample.msg",
+        "sha256": "a0e147cb96a9721aaa65b9d834b10e6dbfca688923eb286ae6308add462e1ea6"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoCapture.msg",
+        "sha256": "c326192addd5a4d0fb46d9a09b8dbdfc1340731e97bc1357a386fd94ddb7905e"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoCaptureResult.msg",
+        "sha256": "c31c6473b91c9ce1e616015aed04256bc0ef43a66947cb18ed8b810049bb1514"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoControl.msg",
+        "sha256": "fd128cfce79c0ad4b0e3c0823fdfb6ff88bef0e996f58710361e15e38867b0b2"
+      },
+      {
+        "path": "src/guided_interfaces/msg/VideoStatus.msg",
+        "sha256": "1d3c2121099b22e3123cb4a6a09d405158794393ca260c4035583e7a8875c38c"
+      },
+      {
+        "path": "src/guided_interfaces/msg/Waypoint.msg",
+        "sha256": "01f4d015f880379e6fda6c1ddf0bb4da07a94b5de6ab83922ad1019913ae009f"
+      },
+      {
+        "path": "src/guided_interfaces/package.xml",
+        "sha256": "dca6954a7ef7787d0f2387f09d687e9caf0100606a3361045fc51971b5b956a9"
+      },
+      {
+        "path": "src/guided_interfaces/srv/AcquireControl.srv",
+        "sha256": "efeca16c387a1ad545ebf0a59181606442ff3187d142bd0f938f7f4d34f8b997"
+      },
+      {
+        "path": "src/guided_interfaces/srv/ExecuteWaypoints.srv",
+        "sha256": "688a33f6e1a8e0c63f4f0410b1bff4b4d7e8a3c229cbd9cece00943c3a316c9d"
+      },
+      {
+        "path": "src/guided_interfaces/srv/FlightCommand.srv",
+        "sha256": "61983b88722f87436eac8bd6013b8182606719659cf7814b5f851a947a3093e7"
+      },
+      {
+        "path": "src/guided_interfaces/srv/SetGpsOrigin.srv",
+        "sha256": "e332cdd24c3225a51d89fd55726728b6427f5b112fd40a7c578fbe7978ed4a02"
+      },
+      {
+        "path": "src/guided_interfaces/srv/SetNavigationMode.srv",
+        "sha256": "cb2730cc39d80df6f19ba2567a20ab7c8d953510a6bb8b5e0bd2a812d25bd309"
+      },
+      {
+        "path": "src/guided_interfaces/srv/SetVideoState.srv",
+        "sha256": "e8c539627a0e07147966fb3301112aa58ba57579b6e765acfcdb24cea6d11bc9"
+      },
+      {
+        "path": "src/path_planning/CMakeLists.txt",
+        "sha256": "3e0c505390af2ceb335465fee16735f53ddebb6062e33e0ddefbc6e216da0564"
+      },
+      {
+        "path": "src/path_planning/README.md",
+        "sha256": "ce00a51edd09fe06c81744933d9a001f354c47e72522b707aa07e709aa75989e"
+      },
+      {
+        "path": "src/path_planning/config/planner.yaml",
+        "sha256": "1db338f072eaf154b6c7569dfda5e77a5d073fd0ce1f943b8fcc6a4ebc7e1f5a"
+      },
+      {
+        "path": "src/path_planning/launch/odin.launch.py",
+        "sha256": "d4de88a74b4f25ff2cd3b66f5aea43d10eba9c3723ff78690d19487978bbe43a"
+      },
+      {
+        "path": "src/path_planning/launch/parameter_config.py",
+        "sha256": "4ecaa537f35078bcd14449759fa0b06491919d26a064a3071024bb05f10a1234"
+      },
+      {
+        "path": "src/path_planning/launch/planner.launch.py",
+        "sha256": "5b1d7e908f37c3d2e1a2d7d246423e0d27509ba984f533819577bc29f3e01b95"
+      },
+      {
+        "path": "src/path_planning/msg/PlanResult.msg",
+        "sha256": "a0b0f825f626301109fb384a7ab173ef01f9c5e9d34c9d1bcd2cbbae6f51de0f"
+      },
+      {
+        "path": "src/path_planning/msg/PolynomialSegment.msg",
+        "sha256": "74f48fbfbdc439f31d40d032509e8f1f2dcbe26ce5185238f5bffa936e796933"
+      },
+      {
+        "path": "src/path_planning/package.xml",
+        "sha256": "856494d42f8900616ebf54762cc1202bcd17e8c8d4fd1568ba3b6c84bd726b20"
+      },
+      {
+        "path": "src/path_planning/src/motion_adapter.hpp",
+        "sha256": "804bbd75512fca7dc54ba55d31f52c6c6e83d2e36c9546bf7b169271fc8b647b"
+      },
+      {
+        "path": "src/path_planning/src/output_contract.hpp",
+        "sha256": "8702e345da9460c96bd126367d531deada90208d39b19f95c2fd40b682a106f7"
+      },
+      {
+        "path": "src/path_planning/src/path_planning.cpp",
+        "sha256": "5d3791a3b711c8ed24449d68ee041712cfded316527acc20af87797cbbe1da78"
+      },
+      {
+        "path": "src/path_planning/srv/PlanMotion.srv",
+        "sha256": "02da68c813a9973a334b410f612a1f5e96a1350abb12fd027767a7adcbe1dfa9"
+      },
+      {
+        "path": "src/path_planning/srv/SetGoal.srv",
+        "sha256": "0b16a9eb44dd6da2a2b6c3d45c93de650b5ed74a52868bcf74985bb38528cb6f"
+      },
+      {
+        "path": "src/path_planning/test/benchmark.py",
+        "sha256": "ae37a531fe2ba3b9ff42f9a421c81b1a19bb5e82b1f897210d1d93e4e30392e0"
+      },
+      {
+        "path": "src/path_planning/test/test_benchmark.py",
+        "sha256": "349833605975e55958735a2515c3d6a4cd9568a5ad621401e4bb55994f998d43"
+      },
+      {
+        "path": "src/path_planning/test/test_launch_config.py",
+        "sha256": "b0aa20cc2f091460e3b2e23fb53d2b70b9487af9b33abc5312fd0962b6e39208"
+      },
+      {
+        "path": "src/path_planning/test/test_motion_adapter.cpp",
+        "sha256": "5a591393cc55c2b127bd3854a843ccafaa02d04562a0846f6fb06f924abd023f"
+      },
+      {
+        "path": "src/path_planning/test/test_motion_service.py",
+        "sha256": "ccb242a1c5666c26cac7d586df382842952e8a12211ba1e940ad11d0d1f98035"
+      },
+      {
+        "path": "src/path_planning/test/test_output_contract.cpp",
+        "sha256": "11c5c86492c774f792e101569520f233d5073bfeb9c0b2a8a178dc901567a243"
+      },
+      {
+        "path": "src/path_planning/test/test_replanning.py",
+        "sha256": "65b7176b8780fb04b58a7f6707d51bc8ac1d832fc33f635f4bb43a8fc36ac783"
+      },
+      {
+        "path": "src/path_planning/test/test_ros_io.py",
+        "sha256": "552dd43949914b90475116ead0e8b9c4900a9a03bb9a23e454e847e6023fe3c7"
+      },
+      {
+        "path": "src/path_searching/CMakeLists.txt",
+        "sha256": "7080decc74c793498cf082e4fec9b12d13daaa6565a16fe7af0f1445fc24562a"
+      },
+      {
+        "path": "src/path_searching/include/path_searching/kinodynamic_astar.h",
+        "sha256": "8e0aa2b711f9e076e2307a2bf68ab76d75651cfe2a67e2c4356dd09c8f38a3f9"
+      },
+      {
+        "path": "src/path_searching/package.xml",
+        "sha256": "f731b002ce52224234e2da627c2f07400a48a9c04274fc6f4f89329bd00297ae"
+      },
+      {
+        "path": "src/path_searching/src/kinodynamic_astar.cpp",
+        "sha256": "21b9c66cb511505585034d6d9393a8463f3633b49ae0abb039e76cbf62933fbf"
+      },
+      {
+        "path": "src/path_searching/test/test_search.cpp",
+        "sha256": "6832a4b01dabe010c2d2a9005ebf0f01568bc756bd438bae7770e86045048f58"
+      }
+    ]
+  },
+  "listing_rule": "UTF-8文件按source_files次序连接；按Python、C++、ROS msg/srv语法去除注释、文档字符串及空行；保留程序文本；Tab展开为4空格。",
+  "total_program_lines": 2242,
+  "submitted_lines": 2242,
+  "selected_ranges": [
+    [
+      1,
+      2242
+    ]
+  ],
+  "files": [
+    {
+      "path": "src/path_searching/include/path_searching/kinodynamic_astar.h",
+      "sha256": "8e0aa2b711f9e076e2307a2bf68ab76d75651cfe2a67e2c4356dd09c8f38a3f9",
+      "start_line": 1,
+      "end_line": 133,
+      "program_lines": 133
+    },
+    {
+      "path": "src/path_searching/src/kinodynamic_astar.cpp",
+      "sha256": "21b9c66cb511505585034d6d9393a8463f3633b49ae0abb039e76cbf62933fbf",
+      "start_line": 134,
+      "end_line": 873,
+      "program_lines": 740
+    },
+    {
+      "path": "src/path_planning/src/motion_adapter.hpp",
+      "sha256": "804bbd75512fca7dc54ba55d31f52c6c6e83d2e36c9546bf7b169271fc8b647b",
+      "start_line": 874,
+      "end_line": 959,
+      "program_lines": 86
+    },
+    {
+      "path": "src/path_planning/src/output_contract.hpp",
+      "sha256": "8702e345da9460c96bd126367d531deada90208d39b19f95c2fd40b682a106f7",
+      "start_line": 960,
+      "end_line": 986,
+      "program_lines": 27
+    },
+    {
+      "path": "src/path_planning/src/path_planning.cpp",
+      "sha256": "5d3791a3b711c8ed24449d68ee041712cfded316527acc20af87797cbbe1da78",
+      "start_line": 987,
+      "end_line": 1545,
+      "program_lines": 559
+    },
+    {
+      "path": "src/path_planning/msg/PolynomialSegment.msg",
+      "sha256": "74f48fbfbdc439f31d40d032509e8f1f2dcbe26ce5185238f5bffa936e796933",
+      "start_line": 1546,
+      "end_line": 1549,
+      "program_lines": 4
+    },
+    {
+      "path": "src/path_planning/msg/PlanResult.msg",
+      "sha256": "a0b0f825f626301109fb384a7ab173ef01f9c5e9d34c9d1bcd2cbbae6f51de0f",
+      "start_line": 1550,
+      "end_line": 1577,
+      "program_lines": 28
+    },
+    {
+      "path": "src/path_planning/srv/PlanMotion.srv",
+      "sha256": "02da68c813a9973a334b410f612a1f5e96a1350abb12fd027767a7adcbe1dfa9",
+      "start_line": 1578,
+      "end_line": 1590,
+      "program_lines": 13
+    },
+    {
+      "path": "src/path_planning/srv/SetGoal.srv",
+      "sha256": "0b16a9eb44dd6da2a2b6c3d45c93de650b5ed74a52868bcf74985bb38528cb6f",
+      "start_line": 1591,
+      "end_line": 1599,
+      "program_lines": 9
+    },
+    {
+      "path": "src/path_planning/launch/parameter_config.py",
+      "sha256": "4ecaa537f35078bcd14449759fa0b06491919d26a064a3071024bb05f10a1234",
+      "start_line": 1600,
+      "end_line": 1673,
+      "program_lines": 74
+    },
+    {
+      "path": "src/path_planning/launch/planner.launch.py",
+      "sha256": "5b1d7e908f37c3d2e1a2d7d246423e0d27509ba984f533819577bc29f3e01b95",
+      "start_line": 1674,
+      "end_line": 1703,
+      "program_lines": 30
+    },
+    {
+      "path": "src/path_planning/launch/odin.launch.py",
+      "sha256": "d4de88a74b4f25ff2cd3b66f5aea43d10eba9c3723ff78690d19487978bbe43a",
+      "start_line": 1704,
+      "end_line": 1736,
+      "program_lines": 33
+    },
+    {
+      "path": "src/avoidance_bridge/src/avoidance_bridge.cpp",
+      "sha256": "b3e87977233e8aa4ddc1282dd4c4f3f92dbe075b6c86ab1dd3f9aab26953461e",
+      "start_line": 1737,
+      "end_line": 2176,
+      "program_lines": 440
+    },
+    {
+      "path": "src/avoidance_bridge/launch/avoidance.launch.py",
+      "sha256": "f85e44dc87f6deaa958cc987da24d9d1531e5c775da5ef444b906f0deac93b04",
+      "start_line": 2177,
+      "end_line": 2242,
+      "program_lines": 66
+    }
+  ],
+  "source_scope": {
+    "software": "无人机点云避障与局部轨迹规划软件",
+    "version": "V1.0",
+    "source_files": [
+      "src/path_searching/include/path_searching/kinodynamic_astar.h",
+      "src/path_searching/src/kinodynamic_astar.cpp",
+      "src/path_planning/src/motion_adapter.hpp",
+      "src/path_planning/src/output_contract.hpp",
+      "src/path_planning/src/path_planning.cpp",
+      "src/path_planning/msg/PolynomialSegment.msg",
+      "src/path_planning/msg/PlanResult.msg",
+      "src/path_planning/srv/PlanMotion.srv",
+      "src/path_planning/srv/SetGoal.srv",
+      "src/path_planning/launch/parameter_config.py",
+      "src/path_planning/launch/planner.launch.py",
+      "src/path_planning/launch/odin.launch.py",
+      "src/avoidance_bridge/src/avoidance_bridge.cpp",
+      "src/avoidance_bridge/launch/avoidance.launch.py"
+    ],
+    "ownership": "path_searching为GPLv3上游算法的改进文件；path_planning为ROS2移植与输出/目标实现；avoidance_bridge为机载任务及坐标接入。原算法及数学继承来源保留HKU-MARS/Fast-Planner版权与致谢，不将全部行数标为原创。",
+    "upstream_derived_files": [
+      "src/path_searching/include/path_searching/kinodynamic_astar.h",
+      "src/path_searching/src/kinodynamic_astar.cpp"
+    ],
+    "shared_dependencies_excluded": [
+      "src/guided_interfaces",
+      "src/correction_interfaces",
+      "src/avoidance_bridge/scripts/avoidance_backend_manager.py",
+      "src/avoidance_bridge/scripts/avoidance_backend_process.py"
+    ],
+    "excluded_from_listing": [
+      "test",
+      "scripts/demo.py",
+      "build.sh",
+      "setup.sh",
+      "run.sh",
+      "CMakeLists.txt",
+      "package.xml"
+    ],
+    "files": [
+      {
+        "path": "src/path_searching/include/path_searching/kinodynamic_astar.h",
+        "sha256": "8e0aa2b711f9e076e2307a2bf68ab76d75651cfe2a67e2c4356dd09c8f38a3f9",
+        "physical_lines": 213,
+        "scope": "GPLv3上游算法改进"
+      },
+      {
+        "path": "src/path_searching/src/kinodynamic_astar.cpp",
+        "sha256": "21b9c66cb511505585034d6d9393a8463f3633b49ae0abb039e76cbf62933fbf",
+        "physical_lines": 860,
+        "scope": "GPLv3上游算法改进"
+      },
+      {
+        "path": "src/path_planning/src/motion_adapter.hpp",
+        "sha256": "804bbd75512fca7dc54ba55d31f52c6c6e83d2e36c9546bf7b169271fc8b647b",
+        "physical_lines": 95,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/src/output_contract.hpp",
+        "sha256": "8702e345da9460c96bd126367d531deada90208d39b19f95c2fd40b682a106f7",
+        "physical_lines": 34,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/src/path_planning.cpp",
+        "sha256": "5d3791a3b711c8ed24449d68ee041712cfded316527acc20af87797cbbe1da78",
+        "physical_lines": 620,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/msg/PolynomialSegment.msg",
+        "sha256": "74f48fbfbdc439f31d40d032509e8f1f2dcbe26ce5185238f5bffa936e796933",
+        "physical_lines": 8,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/msg/PlanResult.msg",
+        "sha256": "a0b0f825f626301109fb384a7ab173ef01f9c5e9d34c9d1bcd2cbbae6f51de0f",
+        "physical_lines": 47,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/srv/PlanMotion.srv",
+        "sha256": "02da68c813a9973a334b410f612a1f5e96a1350abb12fd027767a7adcbe1dfa9",
+        "physical_lines": 18,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/srv/SetGoal.srv",
+        "sha256": "0b16a9eb44dd6da2a2b6c3d45c93de650b5ed74a52868bcf74985bb38528cb6f",
+        "physical_lines": 10,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/launch/parameter_config.py",
+        "sha256": "4ecaa537f35078bcd14449759fa0b06491919d26a064a3071024bb05f10a1234",
+        "physical_lines": 97,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/launch/planner.launch.py",
+        "sha256": "5b1d7e908f37c3d2e1a2d7d246423e0d27509ba984f533819577bc29f3e01b95",
+        "physical_lines": 38,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/path_planning/launch/odin.launch.py",
+        "sha256": "d4de88a74b4f25ff2cd3b66f5aea43d10eba9c3723ff78690d19487978bbe43a",
+        "physical_lines": 42,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/avoidance_bridge/src/avoidance_bridge.cpp",
+        "sha256": "b3e87977233e8aa4ddc1282dd4c4f3f92dbe075b6c86ab1dd3f9aab26953461e",
+        "physical_lines": 488,
+        "scope": "ROS2移植/新增接口或机载接入"
+      },
+      {
+        "path": "src/avoidance_bridge/launch/avoidance.launch.py",
+        "sha256": "f85e44dc87f6deaa958cc987da24d9d1531e5c775da5ef444b906f0deac93b04",
+        "physical_lines": 78,
+        "scope": "ROS2移植/新增接口或机载接入"
+      }
+    ]
+  }
+}

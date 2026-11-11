@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-11",
+  "registration_version": "V1.0",
+  "unchanged_products": [
+    "ground-station",
+    "onboard-control",
+    "position-calibration",
+    "inspection-media"
+  ],
+  "new_products": [
+    {
+      "software": "无人机点云避障与局部轨迹规划软件",
+      "materials": "../pointcloud-planner/materials",
+      "program_lines": 2242,
+      "submitted_lines": 2242
+    },
+    {
+      "software": "无人机CPU与FPGA协同轨迹规划软件",
+      "materials": "../fpga-trajectory-planner/materials",
+      "program_lines": 9201,
+      "submitted_lines": 3000
+    }
+  ]
+}

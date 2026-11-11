@@ -1,0 +1,138 @@
+{
+  "name": "无人机点云避障与局部轨迹规划软件",
+  "purpose": "面向无人机低空巡检等任务，根据已配准点云、实际运动状态和目标位置生成局部避障轨迹，为机载执行软件提供带时间参数的位置、速度与加速度参考。",
+  "environment": [
+    [
+      "软件版本",
+      "V1.0"
+    ],
+    [
+      "操作系统",
+      "Ubuntu 24.04 LTS"
+    ],
+    [
+      "开发与运行环境",
+      "ROS 2 Jazzy、C++17、Python 3.12；PCL、Eigen3、colcon"
+    ],
+    [
+      "计算与输入设备",
+      "x86_64 或 aarch64 主机；已配准点云和里程计数据源"
+    ],
+    [
+      "本次演示环境",
+      "Intel Core i7-9700KF / x86_64；ROS 2 隔离域 229；合成点云及静止里程计"
+    ]
+  ],
+  "source_files": [
+    "src/path_searching/include/path_searching/kinodynamic_astar.h",
+    "src/path_searching/src/kinodynamic_astar.cpp",
+    "src/path_planning/src/motion_adapter.hpp",
+    "src/path_planning/src/output_contract.hpp",
+    "src/path_planning/src/path_planning.cpp",
+    "src/path_planning/msg/PolynomialSegment.msg",
+    "src/path_planning/msg/PlanResult.msg",
+    "src/path_planning/srv/PlanMotion.srv",
+    "src/path_planning/srv/SetGoal.srv",
+    "src/path_planning/launch/parameter_config.py",
+    "src/path_planning/launch/planner.launch.py",
+    "src/path_planning/launch/odin.launch.py",
+    "src/avoidance_bridge/src/avoidance_bridge.cpp",
+    "src/avoidance_bridge/launch/avoidance.launch.py"
+  ],
+  "sections": [
+    {
+      "title": "1 软件概述与组成",
+      "paragraphs": [
+        "本软件围绕“接收环境与状态、生成局部轨迹、发布规划结果”组织功能。点云进入双树累积地图，搜索核心以当前状态和目标为条件进行动力学 A* 搜索，通过末端三次多项式连接目标，输出带有原始时间尺度的轨迹段。",
+        "软件由搜索核心 path_searching、ROS 2 规划节点 path_planning 和机载接入桥 avoidance_bridge 组成。搜索与碰撞检查集中在核心库中，ROS 节点负责输入、重规划和结果发布，接入桥负责业务目标与坐标转换。机载航点导航软件接收规划轨迹并完成跟踪执行。"
+      ],
+      "steps": [],
+      "images": []
+    },
+    {
+      "title": "2 环境准备与启动",
+      "paragraphs": [
+        "安装 ROS 2 Jazzy、PCL、Eigen3、colcon 及所需消息开发包。在软件目录执行 ./build.sh 完成原生构建，执行 source setup.sh 加载当前终端环境，再运行 ./run.sh 启动原生规划节点。",
+        "默认参数文件为 src/path_planning/config/planner.yaml。通过 config:=绝对路径选择自定义文件，通过 cloud、odom、goal 参数接入点云、里程计和目标话题。参数在启动时读取，修改配置后重启节点生效。"
+      ],
+      "steps": [
+        "执行 ./build.sh，完成 path_searching、path_planning、avoidance_bridge 及共用接口包构建。",
+        "执行 ./run.sh cloud:=/cloud_registered odom:=/Odometry goal:=/goal。",
+        "在另一终端执行 source setup.sh，查看 /plan_result、/kino_path 与 /filtered_cloud。"
+      ],
+      "images": []
+    },
+    {
+      "title": "3 配置输入与设置目标",
+      "paragraphs": [
+        "点云使用 sensor_msgs/PointCloud2，里程计使用 nav_msgs/Odometry，目标使用 geometry_msgs/PoseStamped。三者的位置均采用 planning_frame 指定的世界坐标系；里程计速度按 odometry_twist_in_body 配置转换。",
+        "向 /goal 发布目标可进行交互规划；/set_goal 服务通过 target_id、active 管理持久目标和取消。同一标识与相同位置的重复请求保持目标身份，取消目标后地图继续保留，便于后续任务继续使用。"
+      ],
+      "steps": [
+        "确认 planning_frame、点云话题、里程计话题和速度坐标约定。",
+        "设置 search.lower、search.upper、search.safe_distance 以及水平/垂直速度、加速度限额。",
+        "发送目标并检查 /plan_result 中的 target_id、goal_revision、sequence 与状态。"
+      ],
+      "images": []
+    },
+    {
+      "title": "4 规划输出与路径查看",
+      "paragraphs": [
+        "规划节点根据目标、时间、位移和路径阻挡条件触发搜索。成功结果通过 /plan_result 提供多项式段及采样位置、速度、加速度，REACH_END 表示曲线到达目标，REACH_HORIZON 表示当前局部段。状态同时携带地图点数、搜索耗时和有效动力学限额。",
+        "在 RViz2 中将 Fixed Frame 设为 planning_frame，添加 PointCloud2 显示 /filtered_cloud，添加 Path 显示 /kino_path，即可查看障碍点云与路径。图1由本次实际 ROS 2 规划输出绘制：起点为 (0,0,1)，目标为 (4,0,1)，轨迹保持高度并绕过 x=2、y=0 的竖直障碍。"
+      ],
+      "steps": [],
+      "images": [
+        {
+          "path": "运行截图/pointcloud_trajectory.png",
+          "caption": "图1 合成点云输入与真实规划轨迹（俯视及侧视）"
+        }
+      ]
+    },
+    {
+      "title": "5 离线演示与结果检查",
+      "paragraphs": [
+        "执行隔离域演示可快速核对安装和接口。加载 setup.sh 后，设置 ROS_DOMAIN_ID=229、ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST，运行 Python scripts/demo.py --output 输出目录 --seconds 15。程序启动真实规划节点并输入合成点云、里程计和目标，结束后保存点云 CSV、轨迹 CSV、结果 JSON 及节点日志。",
+        "本次15秒演示收到68次 REACH_END 结果。选定首条轨迹包含6段多项式和237个采样点，持续4.712秒。图2直接使用保存的轨迹与结果记录绘制，可据此检查速度、加速度和重复规划耗时。"
+      ],
+      "steps": [],
+      "images": [
+        {
+          "path": "运行截图/trajectory_dynamics.png",
+          "caption": "图2 实际规划输出的动力学曲线与搜索耗时"
+        }
+      ]
+    },
+    {
+      "title": "6 接入机载执行软件",
+      "paragraphs": [
+        "通过 ./run.sh --bridge 启动原生规划器及接入桥。配置 coordinate_mode、点云和里程计来源后，桥将里程计送入 /avoidance/odom，将机载业务目标转换为原生目标服务请求，并将精确轨迹接回 /onboard_control/avoidance_result。相同世界坐标系的独立集成可选择 coordinate_mode:=identity。",
+        "任务结果保留控制会话、任务修订、航点索引及请求身份，并携带规划会话、序号和原始时间信息。轨迹的执行、到点判断和飞控输出由机载航点导航与轨迹跟踪控制软件完成；地面监控软件提供任务操作和状态显示。"
+      ],
+      "steps": [
+        "独立输入使用原生 planner 入口；与既有机载软件联调时使用 --bridge 入口。",
+        "选择实际设备的参考档案并确认外参、原点关系、规划边界与运动限额。",
+        "观察规划状态和业务结果，确认目标身份与轨迹输出一致后交由机载软件执行。"
+      ],
+      "images": []
+    },
+    {
+      "title": "7 维护与源码入口",
+      "paragraphs": [
+        "调整搜索、地图和多项式计算时修改 src/path_searching；调整 ROS 输入、目标生命周期、结果和采样时修改 src/path_planning；调整任务身份及坐标接入时修改 src/avoidance_bridge。共享消息包随软件提供，便于与现有套件保持通信兼容。",
+        "本软件在 HKU-MARS 的 GPLv3 工程基础上完成 ROS 2 移植、算法改进和机载接入，原许可和来源说明随源码保留。登记材料按 SOURCE_BASELINE.json 与 source_files.json 的冻结范围组织，便于复现构建及核对改进内容。"
+      ],
+      "steps": [],
+      "images": []
+    }
+  ],
+  "blank_fields": [
+    "著作权人及统一社会信用代码/证件号",
+    "开发者真实姓名及权属关系",
+    "软件开发完成日期",
+    "首次发表状态、日期与地点",
+    "联系人、地址、电话、电子邮箱",
+    "开发方式及相应职务开发/合作开发协议"
+  ],
+  "slug": "pointcloud-planner"
+}
